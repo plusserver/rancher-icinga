@@ -31,6 +31,9 @@ Optional:
 - **SERVICE_CHECK_COMMAND** Name of the check command used to monitor a Rancher service (default: check_rancher_stack)
 - **RANCHER_INSTALLATION** If you would like to register more than one Rancher installation with Icinga2, give each of them a name.
 - **ICINGA_DEFAULT_VARS** If you would like to add custom variables to the objects created in Icinga2, add comma separated k=v values here.
+- **REFRESH_INTERVAL** If 0 (the default), update Icinga once and then exit. If > 0, run in an endless loop and update every that many seconds.
+- **ICINGA_DEBUG** Add debug output (default: disabled)
+- **ICINGA_INSECURE_TLS** Set to 1 to disable strict TLS cert checking when connection to the Icinga2 API (default: disabled)
 
 The following values are available for templates:
 

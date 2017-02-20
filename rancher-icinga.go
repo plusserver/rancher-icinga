@@ -1,15 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
-	"bytes"
 	"strings"
 	"text/template"
 	"time"
 
-	"github.com/rancher/go-rancher/v2"
 	"github.com/Nexinto/go-icinga2-client/icinga2"
+	"github.com/rancher/go-rancher/v2"
 )
 
 type RancherCheckParameters struct {
@@ -74,6 +74,26 @@ func main() {
 		panic(err)
 	}
 
+	var refreshInterval int
+	if c := os.Getenv("REFRESH_INTERVAL"); c != "" {
+		fmt.Sscanf(c, "%d", &refreshInterval)
+	} else {
+		refreshInterval = 0
+	}
+
+	var debugMode, insecureTLS bool
+
+	if os.Getenv("ICINGA_DEBUG") != "" {
+		debugMode = true
+	} else {
+		debugMode = false
+	}
+	if os.Getenv("ICINGA_INSECURE_TLS") != "" {
+		insecureTLS = true
+	} else {
+		insecureTLS = false
+	}
+
 	rancher, err := client.NewRancherClient(&client.ClientOpts{
 		Url:       os.Getenv("RANCHER_URL"),
 		AccessKey: os.Getenv("RANCHER_ACCESS_KEY"),
@@ -83,228 +103,243 @@ func main() {
 		panic(err)
 	}
 
-	ic, err := icinga2.New(os.Getenv("ICINGA_URL"), os.Getenv("ICINGA_USER"), os.Getenv("ICINGA_PASSWORD"))
+	ic, err := icinga2.New(icinga2.Server{
+		URL:         os.Getenv("ICINGA_URL"),
+		Username:    os.Getenv("ICINGA_USER"),
+		Password:    os.Getenv("ICINGA_PASSWORD"),
+		Debug:       debugMode,
+		InsecureTLS: insecureTLS})
 	if err != nil {
 		panic(err)
 	}
 
-	environmentCache := make(map[string]string)
-	stackCache := make(map[string][2]string) // stack name / environment name
+	for {
+		fmt.Printf("Refreshing at %s\n", time.Now().Local())
 
-	// Synchronize environments with host groups
+		environmentCache := make(map[string]string)
+		stackCache := make(map[string][2]string) // stack name / environment name
 
-	environments, err := rancher.Project.List(nil)
-	if err != nil {
-		panic(err)
-	}
+		// Synchronize environments with host groups
 
-	hostGroups, err := ic.ListHostGroups()
-	if err != nil {
-		panic(err)
-	}
-
-	for _, env := range environments.Data {
-		found := false
-		environmentCache[env.Id] = env.Name
-		for _, hg := range hostGroups {
-			if hg.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
-				hg.Vars[RANCHER_OBJECT_TYPE] == "environment" &&
-				hg.Vars[RANCHER_ENVIRONMENT] == env.Name {
-				found = true
-				continue
-			}
+		environments, err := rancher.Project.List(nil)
+		if err != nil {
+			panic(err)
 		}
-		if found == false {
-			ic.CreateHostGroup(icinga2.HostGroup{
-				Name: execTemplate(environmentNameTemplate, "", env.Name, "", ""),
-				Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
-					RANCHER_INSTALLATION: rancherInstallation,
-					RANCHER_OBJECT_TYPE:  "environment",
-					RANCHER_ENVIRONMENT:  env.Name})})
-		}
-	}
 
-	for _, hg := range hostGroups {
-		if hg.Vars[RANCHER_INSTALLATION] != rancherInstallation {
-			continue // not created by rancher-icinga
+		hostGroups, err := ic.ListHostGroups()
+		if err != nil {
+			panic(err)
 		}
-		found := false
+
 		for _, env := range environments.Data {
-			if hg.Vars[RANCHER_OBJECT_TYPE] == "environment" &&
-				hg.Vars[RANCHER_ENVIRONMENT] == env.Name {
-				found = true
-				continue
+			found := false
+			environmentCache[env.Id] = env.Name
+			for _, hg := range hostGroups {
+				if hg.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
+					hg.Vars[RANCHER_OBJECT_TYPE] == "environment" &&
+					hg.Vars[RANCHER_ENVIRONMENT] == env.Name {
+					found = true
+					continue
+				}
+			}
+			if found == false {
+				ic.CreateHostGroup(icinga2.HostGroup{
+					Name: execTemplate(environmentNameTemplate, "", env.Name, "", ""),
+					Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
+						RANCHER_INSTALLATION: rancherInstallation,
+						RANCHER_OBJECT_TYPE:  "environment",
+						RANCHER_ENVIRONMENT:  env.Name})})
 			}
 		}
-		if found == false {
-			ic.DeleteHostGroup(hg.Name)
-		}
-	}
 
-	// Synchronize rancher agents
-
-	rancherHosts, err := rancher.Host.List(nil)
-	if err != nil {
-		panic(err)
-	}
-
-	icingaHosts, err := ic.ListHosts()
-	if err != nil {
-		panic(err)
-	}
-
-	for _, rh := range rancherHosts.Data {
-		found := false
-		environmentName := environmentCache[rh.AccountId]
-		for _, ih := range icingaHosts {
-			if ih.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
-				ih.Vars[RANCHER_OBJECT_TYPE] == "host" &&
-				ih.Vars[RANCHER_ENVIRONMENT] == environmentName {
-				found = true
-				continue
+		for _, hg := range hostGroups {
+			if hg.Vars[RANCHER_INSTALLATION] != rancherInstallation {
+				continue // not created by rancher-icinga
+			}
+			found := false
+			for _, env := range environments.Data {
+				if hg.Vars[RANCHER_OBJECT_TYPE] == "environment" &&
+					hg.Vars[RANCHER_ENVIRONMENT] == env.Name {
+					found = true
+					continue
+				}
+			}
+			if found == false {
+				ic.DeleteHostGroup(hg.Name)
 			}
 		}
-		if found == false {
-			ic.CreateHost(icinga2.Host{
-				Name:         rh.Hostname,
-				DisplayName:  rh.Hostname,
-				Address:      rh.AgentIpAddress,
-				Groups:       []string{environmentName},
-				CheckCommand: hostCheckCommand,
-				Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
-					RANCHER_INSTALLATION: rancherInstallation,
-					RANCHER_OBJECT_TYPE:  "host",
-					RANCHER_ENVIRONMENT:  environmentName,
-				})})
+
+		// Synchronize rancher agents
+
+		rancherHosts, err := rancher.Host.List(nil)
+		if err != nil {
+			panic(err)
 		}
 
-	}
-
-	for _, ih := range icingaHosts {
-		if ih.Vars[RANCHER_INSTALLATION] != rancherInstallation ||
-			ih.Vars[RANCHER_OBJECT_TYPE] != "host" {
-			continue // not created by rancher-icinga
+		icingaHosts, err := ic.ListHosts()
+		if err != nil {
+			panic(err)
 		}
-		found := false
+
 		for _, rh := range rancherHosts.Data {
-			if ih.Vars[RANCHER_ENVIRONMENT] == environmentCache[rh.AccountId] {
-				found = true
-				continue
+			found := false
+			environmentName := environmentCache[rh.AccountId]
+			for _, ih := range icingaHosts {
+				if ih.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
+					ih.Vars[RANCHER_OBJECT_TYPE] == "host" &&
+					ih.Vars[RANCHER_ENVIRONMENT] == environmentName {
+					found = true
+					continue
+				}
 			}
+			if found == false {
+				ic.CreateHost(icinga2.Host{
+					Name:         rh.Hostname,
+					DisplayName:  rh.Hostname,
+					Address:      rh.AgentIpAddress,
+					Groups:       []string{environmentName},
+					CheckCommand: hostCheckCommand,
+					Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
+						RANCHER_INSTALLATION: rancherInstallation,
+						RANCHER_OBJECT_TYPE:  "host",
+						RANCHER_ENVIRONMENT:  environmentName,
+					})})
+			}
+
 		}
-		if found == false {
-			ic.DeleteHost(ih.Name)
-		}
-	}
 
-	// Synchronize stacks as hosts
-
-	stacks, err := rancher.Stack.List(nil)
-	if err != nil {
-		panic(err)
-	}
-
-	for _, s := range stacks.Data {
-		found := false
-		environmentName := environmentCache[s.AccountId]
-		stackCache[s.Id] = [2]string{s.Name, environmentName}
 		for _, ih := range icingaHosts {
-			if ih.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
-				ih.Vars[RANCHER_OBJECT_TYPE] == "stack" &&
-				ih.Vars[RANCHER_ENVIRONMENT] == environmentName &&
-				ih.Vars[RANCHER_STACK] == s.Name {
-				found = true
+			if ih.Vars[RANCHER_INSTALLATION] != rancherInstallation ||
+				ih.Vars[RANCHER_OBJECT_TYPE] != "host" {
+				continue // not created by rancher-icinga
+			}
+			found := false
+			for _, rh := range rancherHosts.Data {
+				if ih.Vars[RANCHER_ENVIRONMENT] == environmentCache[rh.AccountId] {
+					found = true
+					continue
+				}
+			}
+			if found == false {
+				ic.DeleteHost(ih.Name)
 			}
 		}
-		if found == false {
-			ic.CreateHost(icinga2.Host{
-				Name:         execTemplate(stackNameTemplate, "", environmentName, s.Name, ""),
-				DisplayName:  execTemplate(stackNameTemplate, "", environmentName, s.Name, ""),
-				Groups:       []string{environmentName},
-				CheckCommand: stackCheckCommand,
-				Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
-					RANCHER_INSTALLATION: rancherInstallation,
-					RANCHER_OBJECT_TYPE:  "stack",
-					RANCHER_ENVIRONMENT:  environmentName,
-					RANCHER_STACK:        s.Name,
-				})})
 
-		}
-	}
+		// Synchronize stacks as hosts
 
-	for _, ih := range icingaHosts {
-		if ih.Vars[RANCHER_INSTALLATION] != rancherInstallation ||
-			ih.Vars[RANCHER_OBJECT_TYPE] != "stack" {
-			continue // not created by rancher-icinga
+		stacks, err := rancher.Stack.List(nil)
+		if err != nil {
+			panic(err)
 		}
-		found := false
+
 		for _, s := range stacks.Data {
+			found := false
 			environmentName := environmentCache[s.AccountId]
-			if ih.Vars[RANCHER_ENVIRONMENT] == environmentName &&
-				ih.Vars[RANCHER_STACK] == s.Name {
-				found = true
+			stackCache[s.Id] = [2]string{s.Name, environmentName}
+			for _, ih := range icingaHosts {
+				if ih.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
+					ih.Vars[RANCHER_OBJECT_TYPE] == "stack" &&
+					ih.Vars[RANCHER_ENVIRONMENT] == environmentName &&
+					ih.Vars[RANCHER_STACK] == s.Name {
+					found = true
+				}
+			}
+			if found == false {
+				ic.CreateHost(icinga2.Host{
+					Name:         execTemplate(stackNameTemplate, "", environmentName, s.Name, ""),
+					DisplayName:  execTemplate(stackNameTemplate, "", environmentName, s.Name, ""),
+					Groups:       []string{environmentName},
+					CheckCommand: stackCheckCommand,
+					Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
+						RANCHER_INSTALLATION: rancherInstallation,
+						RANCHER_OBJECT_TYPE:  "stack",
+						RANCHER_ENVIRONMENT:  environmentName,
+						RANCHER_STACK:        s.Name,
+					})})
+
 			}
 		}
-		if found == false {
-			ic.DeleteHost(ih.Name)
-		}
-	}
 
-	// Synchronize services
-
-	rancherServices, err := rancher.Service.List(nil)
-	if err != nil {
-		panic(err)
-	}
-
-	icingaServices, err := ic.ListServices()
-	if err != nil {
-		panic(err)
-	}
-
-	for _, rs := range rancherServices.Data {
-		found := false
-		stackName, environmentName := stackCache[rs.StackId][0], stackCache[rs.StackId][1]
-		for _, is := range icingaServices {
-			if is.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
-				is.Vars[RANCHER_OBJECT_TYPE] == "service" &&
-				is.Vars[RANCHER_STACK] == stackName &&
-				is.Vars[RANCHER_SERVICE] == rs.Name &&
-				is.Vars[RANCHER_ENVIRONMENT] == environmentName {
-				found = true
+		for _, ih := range icingaHosts {
+			if ih.Vars[RANCHER_INSTALLATION] != rancherInstallation ||
+				ih.Vars[RANCHER_OBJECT_TYPE] != "stack" {
+				continue // not created by rancher-icinga
+			}
+			found := false
+			for _, s := range stacks.Data {
+				environmentName := environmentCache[s.AccountId]
+				if ih.Vars[RANCHER_ENVIRONMENT] == environmentName &&
+					ih.Vars[RANCHER_STACK] == s.Name {
+					found = true
+				}
+			}
+			if found == false {
+				ic.DeleteHost(ih.Name)
 			}
 		}
-		if found == false {
-			ic.CreateService(icinga2.Service{
-				Name:         rs.Name,
-				HostName:     execTemplate(stackNameTemplate, "", environmentName, stackName, rs.Name),
-				CheckCommand: serviceCheckCommand,
-				Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
-					RANCHER_INSTALLATION: rancherInstallation,
-					RANCHER_OBJECT_TYPE:  "service",
-					RANCHER_STACK:        stackName,
-					RANCHER_SERVICE:      rs.Name,
-					RANCHER_ENVIRONMENT:  environmentName,
-				})})
-		}
-	}
 
-	for _, is := range icingaServices {
-		if is.Vars[RANCHER_INSTALLATION] != rancherInstallation ||
-			is.Vars[RANCHER_OBJECT_TYPE] != "service" {
-			continue // not created by rancher-icinga
+		// Synchronize services
+
+		rancherServices, err := rancher.Service.List(nil)
+		if err != nil {
+			panic(err)
 		}
-		found := false
+
+		icingaServices, err := ic.ListServices()
+		if err != nil {
+			panic(err)
+		}
+
 		for _, rs := range rancherServices.Data {
+			found := false
 			stackName, environmentName := stackCache[rs.StackId][0], stackCache[rs.StackId][1]
-			if is.Vars[RANCHER_STACK] == stackName &&
-				is.Vars[RANCHER_SERVICE] == rs.Name &&
-				is.Vars[RANCHER_ENVIRONMENT] == environmentName {
-				found = true
+			for _, is := range icingaServices {
+				if is.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
+					is.Vars[RANCHER_OBJECT_TYPE] == "service" &&
+					is.Vars[RANCHER_STACK] == stackName &&
+					is.Vars[RANCHER_SERVICE] == rs.Name &&
+					is.Vars[RANCHER_ENVIRONMENT] == environmentName {
+					found = true
+				}
+			}
+			if found == false {
+				ic.CreateService(icinga2.Service{
+					Name:         rs.Name,
+					HostName:     execTemplate(stackNameTemplate, "", environmentName, stackName, rs.Name),
+					CheckCommand: serviceCheckCommand,
+					Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
+						RANCHER_INSTALLATION: rancherInstallation,
+						RANCHER_OBJECT_TYPE:  "service",
+						RANCHER_STACK:        stackName,
+						RANCHER_SERVICE:      rs.Name,
+						RANCHER_ENVIRONMENT:  environmentName,
+					})})
 			}
 		}
-		if found == false {
-			ic.DeleteService(is.Name)
+
+		for _, is := range icingaServices {
+			if is.Vars[RANCHER_INSTALLATION] != rancherInstallation ||
+				is.Vars[RANCHER_OBJECT_TYPE] != "service" {
+				continue // not created by rancher-icinga
+			}
+			found := false
+			for _, rs := range rancherServices.Data {
+				stackName, environmentName := stackCache[rs.StackId][0], stackCache[rs.StackId][1]
+				if is.Vars[RANCHER_STACK] == stackName &&
+					is.Vars[RANCHER_SERVICE] == rs.Name &&
+					is.Vars[RANCHER_ENVIRONMENT] == environmentName {
+					found = true
+				}
+			}
+			if found == false {
+				ic.DeleteService(is.Name)
+			}
+		}
+
+		if refreshInterval <= 0 {
+			break
+		} else {
+			time.Sleep(time.Duration(refreshInterval) * time.Second)
 		}
 	}
 
