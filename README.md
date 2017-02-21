@@ -8,8 +8,9 @@ Requires Rancher 1.2.0 or later.
 
 ## Getting started
 
-You will need a running Icinga2 and https://github.com/Nexinto/check-rancher. See examples/rancher.conf for how to
-configure the check_rancher commands.
+You will need a running Icinga2 that uses https://github.com/Nexinto/check-rancher. See examples/rancher.conf for how to
+configure the check_rancher commands. (You can configure alternative check commands using the XXX_CHECK_COMMAND environment variables
+(see below).
 
 ## Configuration
 
