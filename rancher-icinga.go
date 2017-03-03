@@ -1,3 +1,5 @@
+// TODO: Deal with environments we do not have access to, but whose stacks/services show up in the API.
+
 package main
 
 import (
@@ -35,13 +37,21 @@ func main() {
 	RANCHER_OBJECT_TYPE := "rancher_object_type"
 
 	hostCheckCommand := "hostalive"
+	//	serverCheckCommand := "hostalive"
 	stackCheckCommand := "check_rancher_stack"
 	serviceCheckCommand := "check_rancher_service"
 
 	rancherInstallation := "default"
 
+	filterHosts := ""
+	filterStacks := ""
+	filterServices := ""
+
 	icingaDefaultVars := map[string]interface{}{}
 
+	//	if c := os.Getenv("SERVER_CHECK_COMMAND"); c != "" {
+	//		serverCheckCommand = c
+	//	}
 	if c := os.Getenv("HOST_CHECK_COMMAND"); c != "" {
 		hostCheckCommand = c
 	}
@@ -54,6 +64,16 @@ func main() {
 
 	if c := os.Getenv("RANCHER_INSTALLATION"); c != "" {
 		rancherInstallation = c
+	}
+
+	if c := os.Getenv("FILTER_HOSTS"); c != "" {
+		filterHosts = c
+	}
+	if c := os.Getenv("FILTER_STACKS"); c != "" {
+		filterStacks = c
+	}
+	if c := os.Getenv("FILTER_SERVICES"); c != "" {
+		filterServices = c
 	}
 
 	if c := os.Getenv("ICINGA_DEFAULT_VARS"); c != "" {
@@ -94,7 +114,7 @@ func main() {
 		insecureTLS = false
 	}
 
-	rancher, err := client.NewRancherClient(&client.ClientOpts{
+	rancherC, err := client.NewRancherClient(&client.ClientOpts{
 		Url:       os.Getenv("RANCHER_URL"),
 		AccessKey: os.Getenv("RANCHER_ACCESS_KEY"),
 		SecretKey: os.Getenv("RANCHER_SECRET_KEY"),
@@ -102,6 +122,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	rancher := NewRancherContext(rancherC)
 
 	ic, err := icinga2.New(icinga2.Server{
 		URL:         os.Getenv("ICINGA_URL"),
@@ -116,12 +138,9 @@ func main() {
 	for {
 		fmt.Printf("Refreshing at %s\n", time.Now().Local())
 
-		environmentCache := make(map[string]string)
-		stackCache := make(map[string][2]string) // stack name / environment name
-
 		// Synchronize environments with host groups
 
-		environments, err := rancher.Project.List(nil)
+		environments, err := rancher.Environments()
 		if err != nil {
 			panic(err)
 		}
@@ -133,7 +152,6 @@ func main() {
 
 		for _, env := range environments.Data {
 			found := false
-			environmentCache[env.Id] = env.Name
 			for _, hg := range hostGroups {
 				if hg.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
 					hg.Vars[RANCHER_OBJECT_TYPE] == "environment" &&
@@ -171,7 +189,7 @@ func main() {
 
 		// Synchronize rancher agents
 
-		rancherHosts, err := rancher.Host.List(nil)
+		rancherHosts, err := rancher.rancher.Host.List(nil)
 		if err != nil {
 			panic(err)
 		}
@@ -182,10 +200,16 @@ func main() {
 		}
 
 		for _, rh := range rancherHosts.Data {
+			if !filterHost(rancher, rh, filterHosts) {
+				continue
+			}
+
 			found := false
-			environmentName := environmentCache[rh.AccountId]
+			environmentName := rancher.GetEnvironment(rh.AccountId).Name
+
 			for _, ih := range icingaHosts {
-				if ih.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
+				if rh.Hostname == ih.Name &&
+					ih.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
 					ih.Vars[RANCHER_OBJECT_TYPE] == "host" &&
 					ih.Vars[RANCHER_ENVIRONMENT] == environmentName {
 					found = true
@@ -215,9 +239,13 @@ func main() {
 			}
 			found := false
 			for _, rh := range rancherHosts.Data {
-				if ih.Vars[RANCHER_ENVIRONMENT] == environmentCache[rh.AccountId] {
+				if filterHost(rancher, rh, filterHosts) &&
+					ih.Name == rh.Hostname &&
+					ih.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
+					ih.Vars[RANCHER_OBJECT_TYPE] == "host" &&
+					ih.Vars[RANCHER_ENVIRONMENT] == rancher.GetEnvironment(rh.AccountId).Name {
 					found = true
-					continue
+					//continue
 				}
 			}
 			if found == false {
@@ -227,15 +255,18 @@ func main() {
 
 		// Synchronize stacks as hosts
 
-		stacks, err := rancher.Stack.List(nil)
+		stacks, err := rancher.Stacks()
 		if err != nil {
 			panic(err)
 		}
 
 		for _, s := range stacks.Data {
+			if !filterStack(rancher, s, filterStacks) {
+				continue
+			}
+
 			found := false
-			environmentName := environmentCache[s.AccountId]
-			stackCache[s.Id] = [2]string{s.Name, environmentName}
+			environmentName := rancher.GetEnvironment(s.AccountId).Name
 			for _, ih := range icingaHosts {
 				if ih.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
 					ih.Vars[RANCHER_OBJECT_TYPE] == "stack" &&
@@ -267,8 +298,9 @@ func main() {
 			}
 			found := false
 			for _, s := range stacks.Data {
-				environmentName := environmentCache[s.AccountId]
-				if ih.Vars[RANCHER_ENVIRONMENT] == environmentName &&
+				environmentName := rancher.GetEnvironment(s.AccountId).Name
+				if filterStack(rancher, s, filterStacks) &&
+					ih.Vars[RANCHER_ENVIRONMENT] == environmentName &&
 					ih.Vars[RANCHER_STACK] == s.Name {
 					found = true
 				}
@@ -280,7 +312,7 @@ func main() {
 
 		// Synchronize services
 
-		rancherServices, err := rancher.Service.List(nil)
+		rancherServices, err := rancher.Services()
 		if err != nil {
 			panic(err)
 		}
@@ -291,8 +323,17 @@ func main() {
 		}
 
 		for _, rs := range rancherServices.Data {
+			if !filterService(rancher, rs, filterServices) {
+				continue
+			}
+
+			if !filterStack(rancher, rancher.GetStack(rs.StackId), filterStacks) {
+				continue
+			}
+
 			found := false
-			stackName, environmentName := stackCache[rs.StackId][0], stackCache[rs.StackId][1]
+			stackName := rancher.GetStack(rs.StackId).Name
+			environmentName := rancher.GetEnvironment(rs.AccountId).Name
 			for _, is := range icingaServices {
 				if is.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
 					is.Vars[RANCHER_OBJECT_TYPE] == "service" &&
@@ -324,8 +365,11 @@ func main() {
 			}
 			found := false
 			for _, rs := range rancherServices.Data {
-				stackName, environmentName := stackCache[rs.StackId][0], stackCache[rs.StackId][1]
-				if is.Vars[RANCHER_STACK] == stackName &&
+				stackName := rancher.GetStack(rs.StackId).Name
+				environmentName := rancher.GetEnvironment(rs.AccountId).Name
+				if filterService(rancher, rs, filterServices) &&
+					filterStack(rancher, rancher.GetStack(rs.StackId), filterStacks) &&
+					is.Vars[RANCHER_STACK] == stackName &&
 					is.Vars[RANCHER_SERVICE] == rs.Name &&
 					is.Vars[RANCHER_ENVIRONMENT] == environmentName {
 					found = true

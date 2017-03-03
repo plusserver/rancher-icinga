@@ -45,3 +45,64 @@ The following values are available for templates:
 - RancherEnvironment
 - RancherStack
 - RancherService
+
+## Filtering
+
+By default, all Rancher agents, stacks and services are added to Icinga. Filters can be set to limit which objects
+are monitored. These are set using environment variables:
+
+- **FILTER_HOSTS**
+- **FILTER_STACKS**
+- **FILTER_SERVICES**
+
+Each value is a comma-seperated list of filter expressions. Match is last. Use a suffix of `!L` to stop processing at that rule.
+A `-` prefix negates the filter expression.
+
+The most obvious way to filter is using labels. Unfortunately, only hosts and services support labels, stacks don't. 
+
+The following filters are supported:
+
+- `*` matches everything.
+- A glob expression matches the name of the agent / stack / service.
+- `LABEL=VALUE` matches a label value. glob is supported for both LABEL and VALUE.
+- `%SYSTEM` matches a system stack or service.
+- `%ENV=ENVNAME` matches is the host, stack or service is deployed in the environment ENVNAME. glob is supported.
+- `%HAS_SERVICE(SERVICENAME)` matches a stack that has a service named SERVICENAME. glob is supported.
+- `%HAS_SERVICE(LABEL=VALUE)` matches a stack that has a service that has a label LABEL with value VALUE. glob is supported for both LABEL and VALUE.
+- `%STACK=STACKNAME` matches if the service is a member of the stack STACKNAME. glob is supported for both LABEL and VALUE.
+
+If a stack does not match a filter, no services will be monitored for this stack. There is no similar behaviour for
+hosts.
+
+Example 1:
+
+Two environments, "prod" and "dev". We would like to monitor all hosts in all environments, all stacks and services in "prod", 
+but only system stacks in "dev".
+
+```
+FILTER_HOSTS="*"
+FILTER_STACKS="*,-%ENV=dev,%SYSTEM"
+FILTER_SERVICES="*,-%ENV=dev,%SYSTEM"
+```
+
+FILTER_SERVICES can be left empty or set to "*" in this example, because there are no services that should not be monitored in a stack
+that is monitored.
+
+FILTER_STACKS could also be written as:
+
+```
+FILTER_STACKS="*,%SYSTEM!L,-%ENV=dev"
+```
+
+Example 2:
+
+One environment "prod", where all hosts should be monitored. All System stacks should be monitored. Only
+services labeled "monitor=true" should be monitored. Stacks that have such services should be monitored).
+
+```
+FILTER_HOSTS="*"
+FILTER_STACKS="-*,%SYSTEM,%HAS_SERVICE(monitor=true)"
+FILTER_SERVICES="-*,%SYSTEM,monitor=true"
+```
+
+(see filter_test.go for more about these two examples)
