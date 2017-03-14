@@ -43,6 +43,7 @@ func main() {
 
 	rancherInstallation := "default"
 
+	filterEnvironments := ""
 	filterHosts := ""
 	filterStacks := ""
 	filterServices := ""
@@ -66,6 +67,9 @@ func main() {
 		rancherInstallation = c
 	}
 
+	if c := os.Getenv("FILTER_ENVIRONMENTS"); c != "" {
+		filterHosts = c
+	}
 	if c := os.Getenv("FILTER_HOSTS"); c != "" {
 		filterHosts = c
 	}
@@ -151,6 +155,10 @@ func main() {
 		}
 
 		for _, env := range environments.Data {
+			if !filterEnvironment(rancher, env, filterEnvironments) {
+				continue
+			}
+
 			found := false
 			for _, hg := range hostGroups {
 				if hg.Vars[RANCHER_INSTALLATION] == rancherInstallation &&
@@ -176,7 +184,8 @@ func main() {
 			}
 			found := false
 			for _, env := range environments.Data {
-				if hg.Vars[RANCHER_OBJECT_TYPE] == "environment" &&
+				if filterEnvironment(rancher, env, filterEnvironments) &&
+					hg.Vars[RANCHER_OBJECT_TYPE] == "environment" &&
 					hg.Vars[RANCHER_ENVIRONMENT] == env.Name {
 					found = true
 					continue

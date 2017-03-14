@@ -48,9 +48,10 @@ The following values are available for templates:
 
 ## Filtering
 
-By default, all Rancher agents, stacks and services are added to Icinga. Filters can be set to limit which objects
+By default, all Rancher environments, agents, stacks and services are added to Icinga. Filters can be set to limit which objects
 are monitored. These are set using environment variables:
 
+- **FILTER_ENVIRONMENTS**
 - **FILTER_HOSTS**
 - **FILTER_STACKS**
 - **FILTER_SERVICES**

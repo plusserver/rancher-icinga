@@ -1,19 +1,27 @@
 package main
 
 import (
-	//	"bytes"
-	//	"fmt"
-	//	"os"
-	//	"strings"
-	//	"text/template"
-	//	"time"
-
 	"testing"
 
-	//	"github.com/Nexinto/go-icinga2-client/icinga2"
 	"github.com/rancher/go-rancher/v2"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestFilterEnvironment(t *testing.T) {
+
+	assert := assert.New(t)
+	rancher := NewRancherContext(nil)
+
+	environment := client.Project{Name: "Default"}
+	assert.True(filterEnvironment(rancher, environment, "*"))
+	assert.True(filterEnvironment(rancher, environment, "Default"))
+	assert.True(filterEnvironment(rancher, environment, "Default,prod,dev,test"))
+	assert.True(filterEnvironment(rancher, environment, "-*-Default,Default,prod,dev,test"))
+
+	environment = client.Project{Name: "myuser-Default"}
+	assert.False(filterEnvironment(rancher, environment, "Default,prod,dev,test"))
+	assert.False(filterEnvironment(rancher, environment, "-*-Default,Default,prod,dev,test"))
+}
 
 func TestFilterHost(t *testing.T) {
 

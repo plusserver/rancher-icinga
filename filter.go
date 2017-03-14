@@ -9,6 +9,35 @@ import (
 	"github.com/rancher/go-rancher/v2"
 )
 
+func filterEnvironment(rancher *RancherContext, env client.Project, filter string) (match bool) {
+	match = false
+	re := regexp.MustCompile("^([+-]?)([a-zA-Z0-9\\.=\\*%-]*)(!L)?$")
+	for _, r := range strings.Split(filter, ",") {
+		ruleParts := re.FindStringSubmatch(r)
+		if ruleParts == nil {
+			panic("failed to match " + r)
+		}
+		ie, rule, mod := ruleParts[1], ruleParts[2], ruleParts[3]
+
+		var ifMatched bool
+		if ie == "" || ie == "+" {
+			ifMatched = true
+		} else if ie == "-" {
+			ifMatched = false
+		}
+
+		if r == "" {
+			match = true
+		} else if glob.MustCompile(rule).Match(env.Name) {
+			match = ifMatched
+			if mod == "!L" {
+				return
+			}
+		}
+	}
+	return
+}
+
 func filterHost(rancher *RancherContext, host client.Host, filter string) (match bool) {
 	match = false
 	re := regexp.MustCompile("^([+-]?)([a-zA-Z0-9\\.=\\*%-]*)(!L)?$")
@@ -49,9 +78,7 @@ func filterHost(rancher *RancherContext, host client.Host, filter string) (match
 			if mod == "!L" {
 				return
 			}
-
 		}
-
 	}
 	return
 }
@@ -176,7 +203,6 @@ func filterService(rancher *RancherContext, service client.Service, filter strin
 				return
 			}
 		}
-
 	}
 	return
 }

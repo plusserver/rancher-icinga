@@ -30,12 +30,12 @@ func (r *RancherContext) AddEnvironment(env client.Project) {
 func (r *RancherContext) Environments() (environments *client.ProjectCollection, err error) {
 	environments, err = r.rancher.Project.List(nil)
 	if err != nil {
-		return 
+		return
 	}
 	for _, env := range environments.Data {
 		r.AddEnvironment(env)
 	}
-	
+
 	return
 }
 
