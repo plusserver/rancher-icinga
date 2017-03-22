@@ -35,6 +35,8 @@ Optional:
 - **REFRESH_INTERVAL** If 0 (the default), update Icinga once and then exit. If > 0, run in an endless loop and update every that many seconds.
 - **ICINGA_DEBUG** Add debug output (default: disabled)
 - **ICINGA_INSECURE_TLS** Set to 1 to disable strict TLS cert checking when connection to the Icinga2 API (default: disabled)
+- **FILTER...** See below (Filtering)
+- **REGISTER_CHANGES** See below (Registering change events)
 
 The following values are available for templates:
 
@@ -107,3 +109,12 @@ FILTER_SERVICES="-*,%SYSTEM,monitor=true"
 ```
 
 (see filter_test.go for more about these two examples)
+
+## Registering change events
+
+Set the environment variable REGISTER_CHANGES to an URL that will receive a POST request with every change that
+rancher-icinga makes. A JSON object will be posted with the following fields:
+- **operation** - the type of the change (created, delete)
+- **name** - the name of the object being created or deleted
+- **type** - the object type
+- **vars** - the "vars" of the icinga object

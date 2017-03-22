@@ -4,7 +4,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"text/template"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/Nexinto/go-icinga2-client/icinga2"
 	"github.com/rancher/go-rancher/v2"
+
+	"gopkg.in/jmcvetta/napping.v3"
 )
 
 type RancherCheckParameters struct {
@@ -22,6 +26,13 @@ type RancherCheckParameters struct {
 	RancherEnvironment string
 	RancherStack       string
 	RancherService     string
+}
+
+type IcingaEvent struct {
+	Operation  string                 `json:"operation"`
+	Name       string                 `json:"name"`
+	IcingaType string                 `json:"type"`
+	Vars       map[string]interface{} `json:"vars"`
 }
 
 func main() {
@@ -169,12 +180,13 @@ func main() {
 				}
 			}
 			if found == false {
-				ic.CreateHostGroup(icinga2.HostGroup{
-					Name: execTemplate(environmentNameTemplate, "", env.Name, "", ""),
-					Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
-						RANCHER_INSTALLATION: rancherInstallation,
-						RANCHER_OBJECT_TYPE:  "environment",
-						RANCHER_ENVIRONMENT:  env.Name})})
+				name := execTemplate(environmentNameTemplate, "", env.Name, "", "")
+				vars := mergeMaps(icingaDefaultVars, map[string]interface{}{
+					RANCHER_INSTALLATION: rancherInstallation,
+					RANCHER_OBJECT_TYPE:  "environment",
+					RANCHER_ENVIRONMENT:  env.Name})
+				ic.CreateHostGroup(icinga2.HostGroup{Name: name, Vars: vars})
+				registerChange("create", name, "hostgroup", vars)
 			}
 		}
 
@@ -192,6 +204,7 @@ func main() {
 				}
 			}
 			if found == false {
+				registerChange("delete", hg.Name, "hostgroup", map[string]interface{}{})
 				ic.DeleteHostGroup(hg.Name)
 			}
 		}
@@ -226,17 +239,19 @@ func main() {
 				}
 			}
 			if found == false {
+				vars := mergeMaps(icingaDefaultVars, map[string]interface{}{
+					RANCHER_INSTALLATION: rancherInstallation,
+					RANCHER_OBJECT_TYPE:  "host",
+					RANCHER_ENVIRONMENT:  environmentName,
+				})
 				ic.CreateHost(icinga2.Host{
 					Name:         rh.Hostname,
 					DisplayName:  rh.Hostname,
 					Address:      rh.AgentIpAddress,
 					Groups:       []string{environmentName},
 					CheckCommand: hostCheckCommand,
-					Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
-						RANCHER_INSTALLATION: rancherInstallation,
-						RANCHER_OBJECT_TYPE:  "host",
-						RANCHER_ENVIRONMENT:  environmentName,
-					})})
+					Vars:         vars})
+				registerChange("create", rh.Hostname, "host", vars)
 			}
 
 		}
@@ -258,6 +273,7 @@ func main() {
 				}
 			}
 			if found == false {
+				registerChange("delete-cascade", ih.Name, "host", map[string]interface{}{})
 				ic.DeleteHost(ih.Name)
 			}
 		}
@@ -285,18 +301,20 @@ func main() {
 				}
 			}
 			if found == false {
+				name := execTemplate(stackNameTemplate, "", environmentName, s.Name, "")
+				vars := mergeMaps(icingaDefaultVars, map[string]interface{}{
+					RANCHER_INSTALLATION: rancherInstallation,
+					RANCHER_OBJECT_TYPE:  "stack",
+					RANCHER_ENVIRONMENT:  environmentName,
+					RANCHER_STACK:        s.Name,
+				})
 				ic.CreateHost(icinga2.Host{
-					Name:         execTemplate(stackNameTemplate, "", environmentName, s.Name, ""),
-					DisplayName:  execTemplate(stackNameTemplate, "", environmentName, s.Name, ""),
+					Name:         name,
+					DisplayName:  name,
 					Groups:       []string{environmentName},
 					CheckCommand: stackCheckCommand,
-					Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
-						RANCHER_INSTALLATION: rancherInstallation,
-						RANCHER_OBJECT_TYPE:  "stack",
-						RANCHER_ENVIRONMENT:  environmentName,
-						RANCHER_STACK:        s.Name,
-					})})
-
+					Vars:         vars})
+				registerChange("create", name, "host", vars)
 			}
 		}
 
@@ -315,6 +333,7 @@ func main() {
 				}
 			}
 			if found == false {
+				registerChange("delete-cascade", ih.Name, "host", map[string]interface{}{})
 				ic.DeleteHost(ih.Name)
 			}
 		}
@@ -353,17 +372,20 @@ func main() {
 				}
 			}
 			if found == false {
+				vars := mergeMaps(icingaDefaultVars, map[string]interface{}{
+					RANCHER_INSTALLATION: rancherInstallation,
+					RANCHER_OBJECT_TYPE:  "service",
+					RANCHER_STACK:        stackName,
+					RANCHER_SERVICE:      rs.Name,
+					RANCHER_ENVIRONMENT:  environmentName,
+				})
+				hostname := execTemplate(stackNameTemplate, "", environmentName, stackName, rs.Name)
 				ic.CreateService(icinga2.Service{
 					Name:         rs.Name,
-					HostName:     execTemplate(stackNameTemplate, "", environmentName, stackName, rs.Name),
+					HostName:     hostname,
 					CheckCommand: serviceCheckCommand,
-					Vars: mergeMaps(icingaDefaultVars, map[string]interface{}{
-						RANCHER_INSTALLATION: rancherInstallation,
-						RANCHER_OBJECT_TYPE:  "service",
-						RANCHER_STACK:        stackName,
-						RANCHER_SERVICE:      rs.Name,
-						RANCHER_ENVIRONMENT:  environmentName,
-					})})
+					Vars:         vars})
+				registerChange("create", fmt.Sprintf("%s!%s", hostname, rs.Name), "service", vars)
 			}
 		}
 
@@ -385,6 +407,7 @@ func main() {
 				}
 			}
 			if found == false {
+				registerChange("delete", is.Name, "service", map[string]interface{}{})
 				ic.DeleteService(is.Name)
 			}
 		}
@@ -452,4 +475,26 @@ func mergeMaps(a map[string]interface{}, b map[string]interface{}) (r map[string
 		r[k] = v
 	}
 	return
+}
+
+func registerChange(operation string, name string, icingatype string, vars map[string]interface{}) {
+	if url := os.Getenv("REGISTER_CHANGES"); url != "" {
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		client := &http.Client{Transport: transport}
+
+		naps := napping.Session{
+			Client: client,
+		}
+
+		ev := IcingaEvent{Operation: operation, Name: name, IcingaType: icingatype, Vars: vars}
+
+		fmt.Printf("Sending event to %s: %q\n", url, ev)
+
+		_, err := naps.Post(url, ev, nil, nil)
+		if err != nil {
+			fmt.Println("error sending change event", err)
+		}
+	}
 }
