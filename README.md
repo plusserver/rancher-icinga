@@ -33,7 +33,7 @@ Optional:
 - **RANCHER_INSTALLATION** If you would like to register more than one Rancher installation with Icinga2, give each of them a name.
 - **ICINGA_DEFAULT_VARS** If you would like to add custom variables to the objects created in Icinga2, add comma separated k=v values here.
 - **REFRESH_INTERVAL** If 0 (the default), update Icinga once and then exit. If > 0, run in an endless loop and update every that many seconds.
-- **ICINGA_DEBUG** Add debug output (default: disabled)
+- **ICINGA_DEBUG** Add debug output (default: disabled). 1 for output of write operations, 2 for checks, 3 for tracing of API requests.
 - **ICINGA_INSECURE_TLS** Set to 1 to disable strict TLS cert checking when connection to the Icinga2 API (default: disabled)
 - **FILTER...** See below (Filtering)
 - **REGISTER_CHANGES** See below (Registering change events)
