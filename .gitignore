@@ -1,3 +1,7 @@
 .project
 src
 rancher-icinga
+bin
+pkg
+eventlistener/src
+eventlistener/eventlistener

@@ -10,7 +10,7 @@ import (
 func TestFilterEnvironment(t *testing.T) {
 
 	assert := assert.New(t)
-	rancher := NewRancherContext(nil)
+	rancher := NewRancherMockClient()
 
 	environment := client.Project{Name: "Default"}
 	assert.True(filterEnvironment(rancher, environment, "*"))
@@ -26,7 +26,7 @@ func TestFilterEnvironment(t *testing.T) {
 func TestFilterHost(t *testing.T) {
 
 	assert := assert.New(t)
-	rancher := NewRancherContext(nil)
+	rancher := NewRancherMockClient()
 
 	rancher.AddEnvironment(client.Project{Name: "Default", Resource: client.Resource{Id: "1a5"}})
 	host := client.Host{Hostname: "agent01.mysite.com", AccountId: "1a5", Labels: map[string]interface{}{"monitor": "true", "stage": "develop"}}
@@ -49,7 +49,7 @@ func TestFilterHost(t *testing.T) {
 func TestFilterStack(t *testing.T) {
 
 	assert := assert.New(t)
-	rancher := NewRancherContext(nil)
+	rancher := NewRancherMockClient()
 
 	rancher.AddEnvironment(client.Project{Name: "Default", Resource: client.Resource{Id: "1a5"}})
 	rancher.AddService(client.Service{Name: "service1", AccountId: "1a5", Resource: client.Resource{Id: "3a1"}, LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{"monitor": "true"}}})
@@ -73,7 +73,7 @@ func TestFilterStack(t *testing.T) {
 func TestFilterService(t *testing.T) {
 
 	assert := assert.New(t)
-	rancher := NewRancherContext(nil)
+	rancher := NewRancherMockClient()
 
 	rancher.AddEnvironment(client.Project{Name: "Default", Resource: client.Resource{Id: "1a5"}})
 	rancher.AddStack(client.Stack{Name: "mystack", AccountId: "1a5", ServiceIds: []string{"3a1", "3a2"}})
@@ -101,7 +101,7 @@ func TestFilterService(t *testing.T) {
 func TestExample1(t *testing.T) {
 
 	assert := assert.New(t)
-	rancher := NewRancherContext(nil)
+	rancher := NewRancherMockClient()
 
 	rancher.AddEnvironment(client.Project{Name: "prod", Resource: client.Resource{Id: "1a5"}})
 	rancher.AddEnvironment(client.Project{Name: "dev", Resource: client.Resource{Id: "1a6"}})
@@ -158,7 +158,7 @@ func TestExample1(t *testing.T) {
 func TestExample2(t *testing.T) {
 
 	assert := assert.New(t)
-	rancher := NewRancherContext(nil)
+	rancher := NewRancherMockClient()
 
 	rancher.AddEnvironment(client.Project{Name: "prod", Resource: client.Resource{Id: "1a5"}})
 	rancher.AddEnvironment(client.Project{Name: "dev", Resource: client.Resource{Id: "1a6"}})

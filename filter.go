@@ -9,25 +9,25 @@ import (
 	"github.com/rancher/go-rancher/v2"
 )
 
-func filterEnvironment(rancher *RancherContext, env client.Project, filter string) bool {
+func filterEnvironment(rancher RancherGenClient, env client.Project, filter string) bool {
 	return filterSomething(rancher, env, filter1Environment, filter)
 }
 
-func filterHost(rancher *RancherContext, host client.Host, filter string) bool {
+func filterHost(rancher RancherGenClient, host client.Host, filter string) bool {
 	return filterSomething(rancher, host, filter1Host, filter)
 }
 
-func filterStack(rancher *RancherContext, stack client.Stack, filter string) bool {
+func filterStack(rancher RancherGenClient, stack client.Stack, filter string) bool {
 	return filterSomething(rancher, stack, filter1Stack, filter)
 }
 
-func filterService(rancher *RancherContext, service client.Service, filter string) bool {
+func filterService(rancher RancherGenClient, service client.Service, filter string) bool {
 	return filterSomething(rancher, service, filter1Service, filter)
 }
 
-func filterSomething(rancher *RancherContext,
+func filterSomething(rancher RancherGenClient,
 	obj interface{},
-	filterFunc func(*RancherContext, interface{}, string) bool,
+	filterFunc func(RancherGenClient, interface{}, string) bool,
 	filter string) (match bool) {
 
 	match = false
@@ -53,7 +53,7 @@ func filterSomething(rancher *RancherContext,
 	return
 }
 
-func filter1Environment(rancher *RancherContext, obj interface{}, rule string) bool {
+func filter1Environment(rancher RancherGenClient, obj interface{}, rule string) bool {
 	env := obj.(client.Project)
 
 	if rule == "" {
@@ -65,7 +65,7 @@ func filter1Environment(rancher *RancherContext, obj interface{}, rule string) b
 	return false
 }
 
-func filter1Host(rancher *RancherContext, obj interface{}, rule string) bool {
+func filter1Host(rancher RancherGenClient, obj interface{}, rule string) bool {
 	host := obj.(client.Host)
 
 	if rule == "" {
@@ -87,7 +87,7 @@ func filter1Host(rancher *RancherContext, obj interface{}, rule string) bool {
 	return false
 }
 
-func filter1Stack(rancher *RancherContext, obj interface{}, rule string) bool {
+func filter1Stack(rancher RancherGenClient, obj interface{}, rule string) bool {
 	stack := obj.(client.Stack)
 
 	if rule == "" {
@@ -122,7 +122,7 @@ func filter1Stack(rancher *RancherContext, obj interface{}, rule string) bool {
 	return false
 }
 
-func filter1Service(rancher *RancherContext, obj interface{}, rule string) bool {
+func filter1Service(rancher RancherGenClient, obj interface{}, rule string) bool {
 	service := obj.(client.Service)
 	if rule == "" {
 		return true
