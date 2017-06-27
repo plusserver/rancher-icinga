@@ -82,6 +82,40 @@ Similarly, custom Notes URL entries in Icinga can be created using the following
 Note that since Rancher stacks do not support labels, you will have to set the label for the stack on a service
 for that stack.
 
+## Custom checks
+
+A service can deploy additional Icinga2 checks. If you would like to check for more than what
+Racher considers the state of your service, you can add any number of checks that will be run by Icinga2 as
+additional services for your Rancher. These checks are configured as the Rancher service
+label **icinga.custom_checks**. The format is a YAML array of services with the attributes name, check name as
+used by Icinga2, notes URL and a map with Vars. For example, this deploys an nginx service with two additional
+HTTP checks:
+
+```
+version: '2'
+services:
+  nginx:
+    image: nginx
+    labels:
+      io.rancher.container.pull_image: always
+      icinga.custom_checks: |
+        - name: http
+          command: http
+          notes_url: http://docs.mysite.com/internal_service.html
+          vars:
+            http_address: nginx.mysite.rancher.internal
+            http_port: 80
+            http_uri: /health_int
+        - name: http_xt
+          command: http
+          notes_url: http://docs.mysite.com/external_service.html
+          vars:
+            http_address: www.mysite.com
+            http_port: 80
+            http_uri: /health
+```
+
+
 ## Filtering
 
 By default, all Rancher environments, agents, stacks and services are added to Icinga. Filters can be set to limit which objects

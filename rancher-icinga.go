@@ -18,6 +18,7 @@ import (
 	"github.com/rancher/go-rancher/v2"
 
 	"gopkg.in/jmcvetta/napping.v3"
+	"gopkg.in/yaml.v2"
 )
 
 // The names of the inciga2 Vars as constants.
@@ -38,6 +39,8 @@ const SERVICE_NOTES_URL_LABEL = "icinga.service_notes_url"
 const HOST_VARS_LABEL = "icinga.host_vars"
 const STACK_VARS_LABEL = "icinga.stack_vars"
 const SERVICE_VARS_LABEL = "icinga.service_vars"
+
+const CUSTOM_CHECKS_LABEL = "icinga.custom_checks"
 
 type RancherCheckParameters struct {
 	Hostname           string
@@ -85,6 +88,17 @@ type RancherIcingaConfig struct {
 	icinga  icinga2.Client
 	rancher RancherGenClient
 }
+
+type CustomCheck struct {
+	Name     string                 `yaml:"name"`
+	NotesURL string                 `yaml:"notes_url,omitempty"`
+	Command  string                 `yaml:"command,omitempty"`
+	Vars     map[string]interface{} `yaml:"vars,omitempty"`
+}
+
+//type CustomChecks struct {
+//	Checks map[string]CustomCheck `yaml:"checks,omitempty"`
+//}
 
 func NewBaseConfig() (cc *RancherIcingaConfig, err error) {
 	cc = new(RancherIcingaConfig)
@@ -373,7 +387,6 @@ func syncRancherHosts(config *RancherIcingaConfig) {
 			vars := varsForHost(config, rh, environmentName)
 			ih := icinga2.Host{
 				Name:         rh.Hostname,
-				DisplayName:  rh.Hostname,
 				Address:      rh.AgentIpAddress,
 				Groups:       []string{environmentName},
 				CheckCommand: config.hostCheckCommand,
@@ -417,7 +430,7 @@ func syncRancherHosts(config *RancherIcingaConfig) {
 
 			debugLog("Creating agent service check for host "+rh.Hostname, 1)
 			is := icinga2.Service{
-				Name:         rh.Hostname + "!rancher-agent",
+				Name:         "rancher-agent",
 				HostName:     rh.Hostname,
 				CheckCommand: config.agentServiceCheckCommand,
 				NotesURL:     notesURL,
@@ -530,7 +543,6 @@ func syncRancherStacks(config *RancherIcingaConfig) {
 			vars := varsForStack(config, s, environmentName)
 			ih := icinga2.Host{
 				Name:         name,
-				DisplayName:  name,
 				Groups:       []string{environmentName},
 				CheckCommand: config.stackCheckCommand,
 				NotesURL:     notesURL,
@@ -584,7 +596,7 @@ func syncRancherServices(config *RancherIcingaConfig) {
 		stackName := config.rancher.GetStack(rs.StackId).Name
 		environmentName := config.rancher.GetEnvironment(rs.AccountId).Name
 
-		debugLog("Syncing service ["+environmentName+"] "+stackName+"/"+rs.Name, 2)
+		debugLog("Syncing service "+environmentName+"."+stackName+"/"+rs.Name, 2)
 
 		if !filterService(config.rancher, rs, config.filterServices) {
 			debugLog("  service disabled by filter", 2)
@@ -594,6 +606,11 @@ func syncRancherServices(config *RancherIcingaConfig) {
 		if !filterStack(config.rancher, config.rancher.GetStack(rs.StackId), config.filterStacks) {
 			debugLog("  stack disabled by filter", 2)
 			continue
+		}
+
+		customChecks, err := config.parseCustomChecks(rs)
+		if err != nil {
+			panic(err)
 		}
 
 		found := false
@@ -617,6 +634,7 @@ func syncRancherServices(config *RancherIcingaConfig) {
 				newVars := varsForService(config, rs, environmentName, stackName)
 
 				if varsNeedUpdate(newVars, is.Vars) {
+					debugLog("Updating service "+is.Name+" with new vars", 1)
 					is.Vars = newVars
 					needUpdate = true
 				}
@@ -633,7 +651,7 @@ func syncRancherServices(config *RancherIcingaConfig) {
 			vars := varsForService(config, rs, environmentName, stackName)
 			hostname := execTemplate(config.stackNameTemplate, "", environmentName, stackName, rs.Name)
 			is := icinga2.Service{
-				Name:         hostname + "!" + rs.Name,
+				Name:         rs.Name,
 				HostName:     hostname,
 				CheckCommand: config.serviceCheckCommand,
 				NotesURL:     notesURL,
@@ -641,6 +659,56 @@ func syncRancherServices(config *RancherIcingaConfig) {
 			config.icinga.CreateService(is)
 			debugLog("Creating service "+is.Name+" for service "+stackName+"/"+rs.Name, 1)
 			registerChange("create", is.Name, "service", vars, is)
+		}
+
+		for _, check := range customChecks {
+			debugLog("Checking custom check "+check.Name, 2)
+
+			found := false
+			vars := varsForCustomCheck(config, check, rs, environmentName, stackName)
+
+			for _, is := range icingaServices {
+				debugLog("  Checking icinga service "+is.Name, 2)
+				if config.matches(is.Vars, "custom-check", environmentName, stackName, rs.Name) &&
+					check.Name == is.Name {
+					debugLog("    found", 2)
+					found = true
+
+					needUpdate := false
+
+					if check.NotesURL != is.NotesURL {
+						debugLog("Updating custom check service "+is.Name+" with notes_url "+check.NotesURL, 1)
+						is.NotesURL = check.NotesURL
+						needUpdate = true
+					}
+
+					if varsNeedUpdate(vars, is.Vars) {
+						debugLog("Updating custom check service "+is.Name+" with new vars", 1)
+						is.Vars = vars
+						needUpdate = true
+					}
+
+					if needUpdate {
+						debugLog("    update "+is.Name, 1)
+						config.icinga.UpdateService(is)
+						registerChange("update", is.Name, "service", is.Vars, is)
+					}
+				}
+			}
+
+			if found == false {
+				hostname := execTemplate(config.stackNameTemplate, "", environmentName, stackName, check.Name)
+				is := icinga2.Service{
+					Name:         check.Name,
+					HostName:     hostname,
+					CheckCommand: check.Command,
+					NotesURL:     check.NotesURL,
+					Vars:         vars}
+				config.icinga.CreateService(is)
+				debugLog("Creating service "+is.Name+" for custom check "+stackName+"/"+check.Name, 1)
+				registerChange("create", is.Name, "service", vars, is)
+			}
+
 		}
 	}
 
@@ -664,7 +732,7 @@ func syncIcingaServices(config *RancherIcingaConfig) {
 
 	for _, is := range icingaServices {
 		debugLog("Syncing icinga service "+is.Name, 2)
-		if !config.matches(is.Vars, "rancher-agent/service", "", "", "") {
+		if !config.matches(is.Vars, "rancher-agent/service/custom-check", "", "", "") {
 			debugLog("  skipping, type or installation do not match", 2)
 			continue // not created by rancher-icinga
 		}
@@ -672,12 +740,31 @@ func syncIcingaServices(config *RancherIcingaConfig) {
 		for _, rs := range rancherServices.Data {
 			stackName := config.rancher.GetStack(rs.StackId).Name
 			environmentName := config.rancher.GetEnvironment(rs.AccountId).Name
-			debugLog("  Checking service ["+environmentName+"] "+stackName+"/"+rs.Name, 2)
+			debugLog("  Checking service "+environmentName+"."+stackName+"/"+rs.Name, 2)
 			if config.matches(is.Vars, "service", environmentName, stackName, rs.Name) &&
 				filterService(config.rancher, rs, config.filterServices) &&
 				filterStack(config.rancher, config.rancher.GetStack(rs.StackId), config.filterStacks) {
-				debugLog("    found", 2)
+				debugLog("    found as the service check", 2)
 				found = true
+			}
+
+			customChecks, err := config.parseCustomChecks(rs)
+			if err != nil {
+				panic(err)
+			}
+
+			for _, check := range customChecks {
+
+				debugLog("  Checking custom check "+check.Name, 2)
+
+				if config.matches(is.Vars, "custom-check", environmentName, stackName, rs.Name) &&
+					filterService(config.rancher, rs, config.filterServices) &&
+					filterStack(config.rancher, config.rancher.GetStack(rs.StackId), config.filterStacks) &&
+					check.Name == is.Name {
+					debugLog("    found as the service check", 2)
+					found = true
+				}
+
 			}
 		}
 
@@ -694,9 +781,9 @@ func syncIcingaServices(config *RancherIcingaConfig) {
 		}
 
 		if found == false {
-			debugLog("Removing service "+is.Name, 1)
+			debugLog("Removing service "+is.HostName+"!"+is.Name, 1)
 			registerChange("delete", is.Name, "service", icinga2.Vars{}, is)
-			defer config.icinga.DeleteService(is.Name)
+			defer config.icinga.DeleteService(is.HostName + "!" + is.Name)
 		}
 	}
 
@@ -829,7 +916,7 @@ func unpackVars(input string) (res icinga2.Vars) {
 
 // Checks if the vars of an icinga object matches with the configured rancher installation, the current
 // and environment and is the correct object type.
-// If the type is "rancher-agent/service" or "stack/host" it will match both types as those icinga
+// If the type is "rancher-agent/service/custom-check" or "stack/host" it will match all types as those icinga
 // object types are used for different rancher object types.
 func (config *RancherIcingaConfig) matches(vars icinga2.Vars, typ, env, stack, service string) bool {
 	var matchesInst, matchesType, matchesEnvironment, matchesStack, matchesService bool
@@ -844,7 +931,10 @@ func (config *RancherIcingaConfig) matches(vars icinga2.Vars, typ, env, stack, s
 		matchesType = true
 	} else if vars[RANCHER_OBJECT_TYPE] == typ {
 		matchesType = true
-	} else if typ == "rancher-agent/service" && (vars[RANCHER_OBJECT_TYPE] == "service" || vars[RANCHER_OBJECT_TYPE] == "rancher-agent") {
+	} else if typ == "rancher-agent/service/custom-check" &&
+		(vars[RANCHER_OBJECT_TYPE] == "service" ||
+			vars[RANCHER_OBJECT_TYPE] == "rancher-agent" ||
+			vars[RANCHER_OBJECT_TYPE] == "custom-check") {
 		matchesType = true
 	} else if typ == "host/stack" && (vars[RANCHER_OBJECT_TYPE] == "host" || vars[RANCHER_OBJECT_TYPE] == "stack") {
 		matchesType = true
@@ -982,6 +1072,14 @@ func varsForService(config *RancherIcingaConfig, service client.Service, environ
 	return
 }
 
+func varsForCustomCheck(config *RancherIcingaConfig, check CustomCheck, service client.Service, environment, stack string) (vars icinga2.Vars) {
+	vars = mergeVars(check.Vars,
+		mergeVars(varsForService(config, service, environment, stack), icinga2.Vars{
+			RANCHER_OBJECT_TYPE: "custom-check"}))
+
+	return
+}
+
 // Find the services for a stack
 func (config *RancherIcingaConfig) servicesOf(stack client.Stack) (*client.ServiceCollection, error) {
 	coll := make([]client.Service, 0, len(stack.ServiceIds))
@@ -991,4 +1089,27 @@ func (config *RancherIcingaConfig) servicesOf(stack client.Stack) (*client.Servi
 	}
 
 	return &client.ServiceCollection{Data: coll}, nil
+}
+
+// Parse custom check configuration from a label
+func (config *RancherIcingaConfig) parseCustomChecks(service client.Service) (checks []CustomCheck, err error) {
+	var label string
+
+	if l, ok := service.LaunchConfig.Labels[CUSTOM_CHECKS_LABEL].(string); ok {
+		label = l
+	} else {
+		return []CustomCheck{}, nil
+	}
+
+	err = yaml.Unmarshal([]byte(label), &checks)
+
+	// Convert everything to strings. Otherwise, an integer entered by the user will be turned into
+	// a float by Icinga2 and trying to find out which services need updating becomes complicated.
+	for _, check := range checks {
+		for k, v := range check.Vars {
+			check.Vars[k] = fmt.Sprintf("%v", v)
+		}
+	}
+
+	return
 }

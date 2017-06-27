@@ -126,7 +126,7 @@ func TestHost(t *testing.T) {
 
 	service := services[0]
 
-	assert.Equal("agent1!rancher-agent", service.Name)
+	assert.Equal("rancher-agent", service.Name)
 	assert.Equal("agent1", service.HostName)
 	assert.Equal("check_rancher_host", service.CheckCommand)
 	assert.Equal("http://docs.mysite.com/panic/agent_down.html", service.NotesURL)
@@ -183,7 +183,7 @@ func TestHost(t *testing.T) {
 	for _, service := range services {
 		if service.HostName == "agent1" {
 			foundService1 = true
-			assert.Equal("agent1!rancher-agent", service.Name)
+			assert.Equal("rancher-agent", service.Name)
 			assert.Equal("agent1", service.HostName)
 			assert.Equal("check_rancher_host", service.CheckCommand)
 			assert.Equal("http://docs.mysite.com/panic/agent_down.html", service.NotesURL)
@@ -194,7 +194,7 @@ func TestHost(t *testing.T) {
 		}
 		if service.HostName == "agent2" {
 			foundService2 = true
-			assert.Equal("agent2!rancher-agent", service.Name)
+			assert.Equal("rancher-agent", service.Name)
 			assert.Equal("agent2", service.HostName)
 			assert.Equal("check_rancher_host", service.CheckCommand)
 			assert.Empty(service.NotesURL)
@@ -235,7 +235,7 @@ func TestHost(t *testing.T) {
 
 	service = services[0]
 
-	assert.Equal("agent2!rancher-agent", service.Name)
+	assert.Equal("rancher-agent", service.Name)
 	assert.Equal("agent2", service.HostName)
 	assert.Equal("check_rancher_host", service.CheckCommand)
 	assert.Empty(service.NotesURL)
@@ -576,7 +576,7 @@ func TestStackNotesURL(t *testing.T) {
 
 func assertBasicServiceVars(assert *assert.Assertions, service icinga2.Service) {
 
-	assert.Equal("Default.mystack!service1", service.Name)
+	assert.Equal("service1", service.Name)
 
 	assert.NotEmpty(service.Vars)
 	assert.Equal("default", service.Vars["rancher_installation"], "the installation should be set")
@@ -646,12 +646,12 @@ func TestService(t *testing.T) {
 
 	foundMyServices := false
 
-	if services[0].Name == "Default.mystack!service1" &&
-		services[1].Name == "Default.mystack!service2" &&
+	if services[0].Name == "service1" &&
+		services[1].Name == "service2" &&
 		services[0].Vars["rancher_service"] == "service1" &&
 		services[1].Vars["rancher_service"] == "service2" ||
-		services[1].Name == "Default.mystack!service1" &&
-			services[0].Name == "Default.mystack!service2" &&
+		services[1].Name == "service1" &&
+			services[0].Name == "service2" &&
 			services[1].Vars["rancher_service"] == "service1" &&
 			services[0].Vars["rancher_service"] == "service2" {
 		foundMyServices = true
@@ -679,7 +679,7 @@ func TestService(t *testing.T) {
 
 	service = services[0]
 
-	assert.Equal("Default.mystack!service2", service.Name, "this should be the second service")
+	assert.Equal("service2", service.Name, "this should be the second service")
 }
 
 // Test: If I add a service label with a notes url, the icinga service must use this URL.
@@ -709,7 +709,7 @@ func TestServiceNotesURL(t *testing.T) {
 
 	service := services[0]
 
-	assert.Equal("Default.mystack!service1", service.Name)
+	assert.Equal("service1", service.Name)
 	assert.Equal("http://docs.mysite.com/service1.html", service.NotesURL, "the notes URL should be set")
 
 	assertBasicServiceVars(assert, service)
@@ -1148,8 +1148,9 @@ func assertEverything(assert *assert.Assertions, config *RancherIcingaConfig) {
 
 	for _, service := range services {
 		if service.Vars["rancher_object_type"] == "service" {
-			if _, ok := expectServices[service.Name]; ok {
-				expectServices[service.Name] = true
+			fullName := service.HostName + "!" + service.Name
+			if _, ok := expectServices[fullName]; ok {
+				expectServices[fullName] = true
 
 				switch service.Vars["rancher_stack"] {
 				case "myapp":
@@ -1189,5 +1190,186 @@ func assertEverything(assert *assert.Assertions, config *RancherIcingaConfig) {
 	for service, found := range expectServices {
 		assert.True(found, "expected to find service "+service)
 	}
+
+}
+
+func TestCustomCheck(t *testing.T) {
+	assert := assert.New(t)
+	config := initForTests()
+
+	config.rancher.AddEnvironment(client.Project{Name: "Default", Resource: client.Resource{Id: "1a5"}})
+	config.rancher.AddStack(client.Stack{
+		Name:       "mystack",
+		AccountId:  "1a5",
+		Resource:   client.Resource{Id: "2a1"},
+		ServiceIds: []string{"3a1"}})
+	config.rancher.AddService(client.Service{
+		Name:      "service1",
+		AccountId: "1a5",
+		Resource:  client.Resource{Id: "3a1"},
+		StackId:   "2a1",
+		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{
+			"icinga.custom_checks": `- name: check1
+  command: http
+  notes_url: http://docs.mysite.com/check1.html
+  vars:
+    http_address: service1.mystack.rancher.internal
+    http_port: 80
+    http_uri: /health
+- name: check2
+  command: http
+  notes_url: http://docs.mysite.com/check2.html
+  vars:
+    http_address: www.mysite.com
+    http_port: 80
+    http_uri: /health`}}})
+
+	sync(config)
+
+	services, err := config.icinga.ListServices()
+
+	assert.Nil(err, "listing the services should not cause an error")
+
+	assert.NotEmpty(services, "the list of services should not be empty")
+	assert.Equal(3, len(services), "we should have 3 monitored services")
+
+	var foundService1, foundService2, foundCustom1, foundCustom2, foundCustom3 bool
+
+	for _, service := range services {
+		assert.Equal("mystack", service.Vars["rancher_stack"])
+		switch service.Name {
+		case "service1":
+			foundService1 = true
+			assert.Equal("check_rancher_service", service.CheckCommand)
+			assert.Equal("service1", service.Vars["rancher_service"])
+		case "check1":
+			foundCustom1 = true
+			assert.Equal("http", service.CheckCommand)
+			assert.Equal("service1.mystack.rancher.internal", service.Vars["http_address"])
+			assert.Equal("80", service.Vars["http_port"]) // yes, a string
+			assert.Equal("service1", service.Vars["rancher_service"])
+		case "check2":
+			foundCustom2 = true
+			assert.Equal("http", service.CheckCommand)
+			assert.Equal("www.mysite.com", service.Vars["http_address"])
+			assert.Equal("80", service.Vars["http_port"])
+			assert.Equal("service1", service.Vars["rancher_service"])
+		default:
+			assert.Fail("Got an unexpected service name " + service.Name)
+		}
+
+	}
+
+	assert.True(foundService1 && foundCustom1 && foundCustom2, "we did not find all 3 expected service checks")
+
+	// Add a second service
+
+	config.rancher.AddStack(client.Stack{
+		Name:       "mystack",
+		AccountId:  "1a5",
+		Resource:   client.Resource{Id: "2a1"},
+		ServiceIds: []string{"3a1", "3a2"}})
+	config.rancher.AddService(client.Service{
+		Name:      "service2",
+		AccountId: "1a5",
+		StackId:   "2a1",
+		Resource:  client.Resource{Id: "3a2"},
+		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{
+			"icinga.custom_checks": `- name: check3
+  command: http
+  notes_url: http://docs.mysite.com/check3.html
+  vars:
+    http_address: service2.mystack.rancher.internal
+    http_port: 80
+    http_uri: /health`}}})
+
+	sync(config)
+
+	services, err = config.icinga.ListServices()
+
+	assert.Nil(err, "listing the services should not cause an error")
+
+	assert.NotEmpty(services, "the list of services should not be empty")
+	assert.Equal(5, len(services), "we should have 5 monitored services")
+
+	foundService1, foundService2, foundCustom1, foundCustom2, foundCustom3 = false, false, false, false, false
+
+	for _, service := range services {
+		assert.Equal("mystack", service.Vars["rancher_stack"])
+		switch service.Name {
+		case "service1":
+			foundService1 = true
+			assert.Equal("check_rancher_service", service.CheckCommand)
+			assert.Equal("service1", service.Vars["rancher_service"])
+		case "service2":
+			foundService2 = true
+			assert.Equal("check_rancher_service", service.CheckCommand)
+			assert.Equal("service2", service.Vars["rancher_service"])
+		case "check1":
+			foundCustom1 = true
+			assert.Equal("http", service.CheckCommand)
+			assert.Equal("service1.mystack.rancher.internal", service.Vars["http_address"])
+			assert.Equal("80", service.Vars["http_port"])
+			assert.Equal("service1", service.Vars["rancher_service"])
+		case "check2":
+			foundCustom2 = true
+			assert.Equal("http", service.CheckCommand)
+			assert.Equal("www.mysite.com", service.Vars["http_address"])
+			assert.Equal("80", service.Vars["http_port"])
+			assert.Equal("service1", service.Vars["rancher_service"])
+		case "check3":
+			foundCustom3 = true
+			assert.Equal("http", service.CheckCommand)
+			assert.Equal("service2.mystack.rancher.internal", service.Vars["http_address"])
+			assert.Equal("80", service.Vars["http_port"])
+			assert.Equal("service2", service.Vars["rancher_service"])
+		default:
+			assert.Fail("Got an unexpected service name " + service.Name)
+		}
+	}
+
+	assert.True(foundService1 && foundService2 && foundCustom1 && foundCustom2 && foundCustom3,
+		"we did not find all 5 expected service checks")
+
+	// Remove the first service
+
+	config.rancher.AddStack(client.Stack{
+		Name:       "mystack",
+		AccountId:  "1a5",
+		Resource:   client.Resource{Id: "2a1"},
+		ServiceIds: []string{"3a2"}})
+	config.rancher.DeleteService("3a1")
+
+	sync(config)
+
+	services, err = config.icinga.ListServices()
+
+	assert.Nil(err, "listing the services should not cause an error")
+
+	assert.NotEmpty(services, "the list of services should not be empty")
+	assert.Equal(2, len(services), "we should have 2 monitored services")
+
+	foundService1, foundService2, foundCustom1, foundCustom2, foundCustom3 = false, false, false, false, false
+
+	for _, service := range services {
+		assert.Equal("mystack", service.Vars["rancher_stack"])
+		switch service.Name {
+		case "service2":
+			foundService2 = true
+			assert.Equal("check_rancher_service", service.CheckCommand)
+			assert.Equal("service2", service.Vars["rancher_service"])
+		case "check3":
+			foundCustom3 = true
+			assert.Equal("http", service.CheckCommand)
+			assert.Equal("service2.mystack.rancher.internal", service.Vars["http_address"])
+			assert.Equal("80", service.Vars["http_port"])
+			assert.Equal("service2", service.Vars["rancher_service"])
+		default:
+			assert.Fail("Got an unexpected service name " + service.Name)
+		}
+	}
+
+	assert.True(foundService2 && foundCustom3,
+		"we did not find all 2 expected service checks")
 
 }
