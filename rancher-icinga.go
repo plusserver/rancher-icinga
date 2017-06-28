@@ -96,10 +96,6 @@ type CustomCheck struct {
 	Vars     map[string]interface{} `yaml:"vars,omitempty"`
 }
 
-//type CustomChecks struct {
-//	Checks map[string]CustomCheck `yaml:"checks,omitempty"`
-//}
-
 func NewBaseConfig() (cc *RancherIcingaConfig, err error) {
 	cc = new(RancherIcingaConfig)
 
@@ -200,7 +196,7 @@ func NewBaseConfig() (cc *RancherIcingaConfig, err error) {
 	cc.environmentNameTemplate, cc.stackNameTemplate, err = makeTemplates()
 
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("error creating templates: %s", err)
 	}
 
 	return
@@ -211,7 +207,7 @@ func NewConfig() (cc *RancherIcingaConfig, err error) {
 	cc, err = NewBaseConfig()
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	rancherClient, err := client.NewRancherClient(&client.ClientOpts{
@@ -221,7 +217,7 @@ func NewConfig() (cc *RancherIcingaConfig, err error) {
 		Timeout:   10 * time.Second})
 
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("error creating rancher client: %s", err)
 	}
 
 	cc.rancher = NewRancherWebClient(rancherClient)
@@ -234,7 +230,7 @@ func NewConfig() (cc *RancherIcingaConfig, err error) {
 		InsecureTLS: cc.insecureTLS})
 
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("error creating icinga client: %s", err)
 	}
 
 	return
@@ -249,15 +245,15 @@ func debugLog(s string, l int) {
 	}
 }
 
-func syncRancherEnvironments(config *RancherIcingaConfig) {
+func syncRancherEnvironments(config *RancherIcingaConfig) error {
 	environments, err := config.rancher.Environments()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching rancher environments: %s", err)
 	}
 
 	hostGroups, err := config.icinga.ListHostGroups()
 	if err != nil {
-		panic(err)
+		fmt.Errorf("error fetching icinga hostgroups: %s", err)
 	}
 
 	for _, env := range environments.Data {
@@ -279,23 +275,30 @@ func syncRancherEnvironments(config *RancherIcingaConfig) {
 		if found == false {
 			name := execTemplate(config.environmentNameTemplate, "", env.Name, "", "")
 			vars := varsForEnvironment(config, env)
-			config.icinga.CreateHostGroup(icinga2.HostGroup{Name: name, Vars: vars})
+			err = config.icinga.CreateHostGroup(icinga2.HostGroup{Name: name, Vars: vars})
+			if err != nil {
+				fmt.Printf("ERROR: could not create hostgroup %s: %s\n", name, err)
+			}
 			debugLog("Creating host group "+name+" for environment", 1)
 			registerChange("create", name, "hostgroup", vars, icinga2.HostGroup{Name: name, Vars: vars})
 		}
 	}
 
+	return nil
 }
 
-func syncIcingaHostgroups(config *RancherIcingaConfig) {
+func syncIcingaHostgroups(config *RancherIcingaConfig) error {
+
+	deleteme := []string{}
+
 	environments, err := config.rancher.Environments()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching rancher environments: %s", err)
 	}
 
 	hostGroups, err := config.icinga.ListHostGroups()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching icinga hostgroups: %s", err)
 	}
 
 	for _, hg := range hostGroups {
@@ -317,37 +320,50 @@ func syncIcingaHostgroups(config *RancherIcingaConfig) {
 		if found == false {
 			registerChange("delete", hg.Name, "hostgroup", icinga2.Vars{}, hg)
 			debugLog("Remove hostgroup "+hg.Name+" for environment", 1)
-			defer config.icinga.DeleteHostGroup(hg.Name)
+			deleteme = append(deleteme, hg.Name)
+			// defer config.icinga.DeleteHostGroup(hg.Name)
 		}
 	}
 
+	for _, x := range deleteme {
+		err := config.icinga.DeleteHostGroup(x)
+
+		if err != nil {
+			fmt.Println("ERROR: could not delete icinga hostgroup %s: %s\n", x, err)
+		}
+	}
+
+	return nil
 }
 
-func syncRancherHosts(config *RancherIcingaConfig) {
+func syncRancherHosts(config *RancherIcingaConfig) error {
 	rancherHosts, err := config.rancher.Hosts()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching rancher hosts: %s", err)
 	}
 
 	icingaHosts, err := config.icinga.ListHosts()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching icinga hosts: %s", err)
 	}
 
 	icingaServices, err := config.icinga.ListServices()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching rancher services: %s", err)
 	}
 
 	for _, rh := range rancherHosts.Data {
 		debugLog("Syncing host "+rh.Hostname, 2)
-		if !filterHost(config.rancher, rh, config.filterHosts) {
+
+		environmentName := config.rancher.GetEnvironment(rh.AccountId).Name
+
+		if !filterHost(config.rancher, rh, config.filterHosts) ||
+			!filterEnvironment(config.rancher, config.rancher.GetEnvironment(rh.AccountId), config.filterEnvironments) {
 			debugLog("  disabled by filter", 2)
 			continue
 		}
 
 		found := false
-		environmentName := config.rancher.GetEnvironment(rh.AccountId).Name
 
 		var notesURL string
 
@@ -392,7 +408,11 @@ func syncRancherHosts(config *RancherIcingaConfig) {
 				CheckCommand: config.hostCheckCommand,
 				NotesURL:     notesURL,
 				Vars:         vars}
-			config.icinga.CreateHost(ih)
+			err = config.icinga.CreateHost(ih)
+			if err != nil {
+				fmt.Printf("ERROR: could not create host %s: %s\n", rh.Hostname, err)
+			}
+
 			debugLog("Creating rancher agent host "+rh.Hostname, 1)
 			registerChange("create", rh.Hostname, "host", vars, ih)
 		}
@@ -435,63 +455,100 @@ func syncRancherHosts(config *RancherIcingaConfig) {
 				CheckCommand: config.agentServiceCheckCommand,
 				NotesURL:     notesURL,
 				Vars:         vars}
-			config.icinga.CreateService(is)
+			err = config.icinga.CreateService(is)
+			if err != nil {
+				fmt.Printf("ERROR: could not create service %s!rancher-agent: %s\n", rh.Hostname, err)
+			}
+
 			registerChange("create", is.Name, "service", vars, is)
 		}
 	}
+
+	return nil
 }
 
-func syncIcingaHosts(config *RancherIcingaConfig) {
+func syncIcingaHosts(config *RancherIcingaConfig) error {
+
+	deleteme := []string{}
+
 	rancherHosts, err := config.rancher.Hosts()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching rancher hosts: %s", err)
 	}
 
 	icingaHosts, err := config.icinga.ListHosts()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching icinga hosts: %s", err)
+	}
+
+	stacks, err := config.rancher.Stacks()
+	if err != nil {
+		return fmt.Errorf("error fetching rancher stacks: %s", err)
 	}
 
 	for _, ih := range icingaHosts {
 		debugLog("Syncing icinga host "+ih.Name, 2)
-		if !config.matches(ih.Vars, "host", "", "", "") {
+		if !config.matches(ih.Vars, "host/stack", "", "", "") {
 			debugLog("  skipping, type or installation do not match", 2)
 			continue // wrong type or not created by rancher-icinga
 		}
 		found := false
 		for _, rh := range rancherHosts.Data {
-			if filterHost(config.rancher, rh, config.filterHosts) &&
-				ih.Name == rh.Hostname &&
-				ih.Vars[RANCHER_INSTALLATION] == config.rancherInstallation &&
-				ih.Vars[RANCHER_OBJECT_TYPE] == "host" &&
-				ih.Vars[RANCHER_ENVIRONMENT] == config.rancher.GetEnvironment(rh.AccountId).Name {
+			environmentName := config.rancher.GetEnvironment(rh.AccountId).Name
+			if config.matches(ih.Vars, "host", environmentName, "", "") &&
+				filterHost(config.rancher, rh, config.filterHosts) &&
+				filterEnvironment(config.rancher, config.rancher.GetEnvironment(rh.AccountId), config.filterEnvironments) &&
+				ih.Name == rh.Hostname {
 				debugLog("    found", 2)
 				found = true
 			}
 		}
+
+		for _, s := range stacks.Data {
+			environmentName := config.rancher.GetEnvironment(s.AccountId).Name
+			debugLog("  Checking stack "+environmentName+"."+s.Name, 2)
+			if config.matches(ih.Vars, "stack", environmentName, s.Name, "") &&
+				filterStack(config.rancher, s, config.filterStacks) &&
+				filterEnvironment(config.rancher, config.rancher.GetEnvironment(s.AccountId), config.filterEnvironments) {
+				debugLog("    found", 2)
+				found = true
+			}
+		}
+
 		if found == false {
 			registerChange("delete-cascade", ih.Name, "host", icinga2.Vars{}, ih)
 			debugLog("Removing rancher agent host "+ih.Name, 1)
-			defer config.icinga.DeleteHost(ih.Name)
+			deleteme = append(deleteme, ih.Name)
 		}
 	}
+
+	for _, x := range deleteme {
+		err := config.icinga.DeleteHost(x)
+
+		if err != nil {
+			fmt.Println("ERROR: could not delete icinga host %s: %s\n", x, err)
+		}
+	}
+
+	return nil
 }
 
-func syncRancherStacks(config *RancherIcingaConfig) {
+func syncRancherStacks(config *RancherIcingaConfig) error {
 	stacks, err := config.rancher.Stacks()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching rancher stacks: %s", err)
 	}
 
 	icingaHosts, err := config.icinga.ListHosts()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching icinga hosts: %s", err)
 	}
 
 	for _, s := range stacks.Data {
 		environmentName := config.rancher.GetEnvironment(s.AccountId).Name
 		debugLog("Syncing stack ["+environmentName+"] "+s.Name, 2)
-		if !filterStack(config.rancher, s, config.filterStacks) {
+		if !filterStack(config.rancher, s, config.filterStacks) ||
+			!filterEnvironment(config.rancher, config.rancher.GetEnvironment(s.AccountId), config.filterEnvironments) {
 			debugLog("  disabled by filter", 2)
 			continue
 		}
@@ -499,7 +556,7 @@ func syncRancherStacks(config *RancherIcingaConfig) {
 		notesURL := ""
 		services, err := config.servicesOf(s)
 		if err != nil {
-			panic(err)
+			fmt.Errorf("error fetching rancher services: %s", err)
 		}
 
 		for _, service := range services.Data {
@@ -547,49 +604,29 @@ func syncRancherStacks(config *RancherIcingaConfig) {
 				CheckCommand: config.stackCheckCommand,
 				NotesURL:     notesURL,
 				Vars:         vars}
-			config.icinga.CreateHost(ih)
+			err = config.icinga.CreateHost(ih)
+			if err != nil {
+				fmt.Printf("ERROR: could not create host %s: %s\n", name, err)
+			}
+
 			debugLog("Creating host "+name+" for stack "+s.Name, 1)
 			registerChange("create", name, "host", vars, ih)
 		}
 
 	}
 
-	for _, ih := range icingaHosts {
-		debugLog("Syncing icinga host "+ih.Name, 2)
-		if ih.Vars[RANCHER_INSTALLATION] != config.rancherInstallation ||
-			ih.Vars[RANCHER_OBJECT_TYPE] != "stack" {
-			debugLog("  skipping, type or installation do not match", 2)
-			continue // not created by rancher-icinga
-		}
-		found := false
-		for _, s := range stacks.Data {
-			environmentName := config.rancher.GetEnvironment(s.AccountId).Name
-			debugLog("  Checking stack ["+environmentName+"] "+s.Name, 2)
-			if filterStack(config.rancher, s, config.filterStacks) &&
-				ih.Vars[RANCHER_ENVIRONMENT] == environmentName &&
-				ih.Vars[RANCHER_STACK] == s.Name {
-				debugLog("    found", 2)
-				found = true
-			}
-		}
-		if found == false {
-			debugLog("Removing host "+ih.Name+" for stack", 1)
-			registerChange("delete-cascade", ih.Name, "host", icinga2.Vars{}, ih)
-			config.icinga.DeleteHost(ih.Name)
-		}
-	}
-
+	return nil
 }
 
-func syncRancherServices(config *RancherIcingaConfig) {
+func syncRancherServices(config *RancherIcingaConfig) error {
 	rancherServices, err := config.rancher.Services()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching rancher services: %s", err)
 	}
 
 	icingaServices, err := config.icinga.ListServices()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching icinga services: %s", err)
 	}
 
 	for _, rs := range rancherServices.Data {
@@ -608,9 +645,14 @@ func syncRancherServices(config *RancherIcingaConfig) {
 			continue
 		}
 
+		if !filterEnvironment(config.rancher, config.rancher.GetEnvironment(rs.AccountId), config.filterEnvironments) {
+			debugLog("  environment disabled by filter", 2)
+			continue
+		}
+
 		customChecks, err := config.parseCustomChecks(rs)
 		if err != nil {
-			panic(err)
+			return fmt.Errorf("error parsing custom checks: %s", err)
 		}
 
 		found := false
@@ -656,7 +698,11 @@ func syncRancherServices(config *RancherIcingaConfig) {
 				CheckCommand: config.serviceCheckCommand,
 				NotesURL:     notesURL,
 				Vars:         vars}
-			config.icinga.CreateService(is)
+			err = config.icinga.CreateService(is)
+			if err != nil {
+				fmt.Printf("ERROR: could not create service %s!%s: %s\n", hostname, rs.Name, err)
+			}
+
 			debugLog("Creating service "+is.Name+" for service "+stackName+"/"+rs.Name, 1)
 			registerChange("create", is.Name, "service", vars, is)
 		}
@@ -704,30 +750,37 @@ func syncRancherServices(config *RancherIcingaConfig) {
 					CheckCommand: check.Command,
 					NotesURL:     check.NotesURL,
 					Vars:         vars}
-				config.icinga.CreateService(is)
-				debugLog("Creating service "+is.Name+" for custom check "+stackName+"/"+check.Name, 1)
-				registerChange("create", is.Name, "service", vars, is)
+				err = config.icinga.CreateService(is)
+				if err != nil {
+					fmt.Printf("ERROR: could not create service %s!%s: %s\n", hostname, check.Name, err)
+				}
+
+				debugLog("Creating service "+check.Name+" for custom check "+stackName+"/"+check.Name, 1)
+				registerChange("create", hostname+"!"+check.Name, "service", vars, is)
 			}
 
 		}
 	}
 
+	return nil
 }
 
-func syncIcingaServices(config *RancherIcingaConfig) {
+func syncIcingaServices(config *RancherIcingaConfig) error {
+	deleteme := []string{}
+
 	rancherServices, err := config.rancher.Services()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching rancher services: %s", err)
 	}
 
 	icingaServices, err := config.icinga.ListServices()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching icinga services: %s", err)
 	}
 
 	rancherHosts, err := config.rancher.Hosts()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error fetching icinga hosts: %s", err)
 	}
 
 	for _, is := range icingaServices {
@@ -743,6 +796,7 @@ func syncIcingaServices(config *RancherIcingaConfig) {
 			debugLog("  Checking service "+environmentName+"."+stackName+"/"+rs.Name, 2)
 			if config.matches(is.Vars, "service", environmentName, stackName, rs.Name) &&
 				filterService(config.rancher, rs, config.filterServices) &&
+				filterEnvironment(config.rancher, config.rancher.GetEnvironment(rs.AccountId), config.filterEnvironments) &&
 				filterStack(config.rancher, config.rancher.GetStack(rs.StackId), config.filterStacks) {
 				debugLog("    found as the service check", 2)
 				found = true
@@ -750,7 +804,7 @@ func syncIcingaServices(config *RancherIcingaConfig) {
 
 			customChecks, err := config.parseCustomChecks(rs)
 			if err != nil {
-				panic(err)
+				return fmt.Errorf("error parsing custom checks: %s", err)
 			}
 
 			for _, check := range customChecks {
@@ -760,6 +814,7 @@ func syncIcingaServices(config *RancherIcingaConfig) {
 				if config.matches(is.Vars, "custom-check", environmentName, stackName, rs.Name) &&
 					filterService(config.rancher, rs, config.filterServices) &&
 					filterStack(config.rancher, config.rancher.GetStack(rs.StackId), config.filterStacks) &&
+					filterEnvironment(config.rancher, config.rancher.GetEnvironment(rs.AccountId), config.filterEnvironments) &&
 					check.Name == is.Name {
 					debugLog("    found as the service check", 2)
 					found = true
@@ -773,6 +828,7 @@ func syncIcingaServices(config *RancherIcingaConfig) {
 			debugLog("  Checking host "+rh.Hostname, 2)
 			if config.matches(is.Vars, "rancher-agent", environmentName, "", "") &&
 				filterHost(config.rancher, rh, config.filterHosts) &&
+				filterEnvironment(config.rancher, config.rancher.GetEnvironment(rh.AccountId), config.filterEnvironments) &&
 				is.Vars[RANCHER_HOST] == rh.Hostname &&
 				is.HostName == rh.Hostname {
 				debugLog("    found", 2)
@@ -782,23 +838,49 @@ func syncIcingaServices(config *RancherIcingaConfig) {
 
 		if found == false {
 			debugLog("Removing service "+is.HostName+"!"+is.Name, 1)
-			registerChange("delete", is.Name, "service", icinga2.Vars{}, is)
-			defer config.icinga.DeleteService(is.HostName + "!" + is.Name)
+			registerChange("delete", is.HostName+"!"+is.Name, "service", icinga2.Vars{}, is)
+			deleteme = append(deleteme, is.HostName+"!"+is.Name)
 		}
 	}
 
+	for _, x := range deleteme {
+		err := config.icinga.DeleteService(x)
+
+		if err != nil {
+			fmt.Println("ERROR: could not delete icinga service %s: %s\n", x, err)
+		}
+	}
+
+	return nil
 }
 
-func sync(config *RancherIcingaConfig) {
-	syncRancherEnvironments(config)
-	syncIcingaHostgroups(config)
+func sync(config *RancherIcingaConfig) error {
+	if err := syncRancherEnvironments(config); err != nil {
+		return err
+	}
 
-	syncRancherHosts(config)
-	syncRancherStacks(config)
-	syncRancherServices(config)
+	if err := syncIcingaHostgroups(config); err != nil {
+		return err
+	}
 
-	syncIcingaHosts(config)
-	syncIcingaServices(config)
+	if err := syncRancherHosts(config); err != nil {
+		return err
+	}
+	if err := syncRancherStacks(config); err != nil {
+		return err
+	}
+	if err := syncRancherServices(config); err != nil {
+		return err
+	}
+
+	if err := syncIcingaHosts(config); err != nil {
+		return err
+	}
+	if err := syncIcingaServices(config); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func main() {
@@ -806,12 +888,17 @@ func main() {
 	config, err := NewConfig()
 
 	if err != nil {
-		panic(err)
+		fmt.Printf("PANIC: could not create configuration: %s", err)
+		return
 	}
 
 	for {
 		fmt.Printf("Refreshing at %s\n", time.Now().Local())
-		sync(config)
+		err := sync(config)
+
+		if err != nil {
+			fmt.Printf("ERROR: %s\n", err)
+		}
 
 		if config.refreshInterval <= 0 {
 			break

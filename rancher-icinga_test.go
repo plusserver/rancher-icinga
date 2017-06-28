@@ -30,7 +30,8 @@ func TestHostgroup(t *testing.T) {
 
 	config.rancher.AddEnvironment(client.Project{Name: "Default", Resource: client.Resource{Id: "1a5"}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hostGroups, _ := config.icinga.ListHostGroups()
 
@@ -50,7 +51,8 @@ func TestHostgroupDefaultIcingaVars(t *testing.T) {
 	config.hostgroupDefaultIcingaVars = icinga2.Vars{"myvar": "yes"}
 	config.rancher.AddEnvironment(client.Project{Name: "Default", Resource: client.Resource{Id: "1a5"}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hostGroups, _ := config.icinga.ListHostGroups()
 
@@ -74,7 +76,8 @@ func TestTwoHostgroups(t *testing.T) {
 	config.rancher.AddEnvironment(client.Project{Name: "First", Resource: client.Resource{Id: "1a5"}})
 	config.rancher.AddEnvironment(client.Project{Name: "Second", Resource: client.Resource{Id: "1a6"}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hostGroups, err := config.icinga.ListHostGroups()
 
@@ -103,7 +106,8 @@ func TestHost(t *testing.T) {
 		Resource:  client.Resource{Id: "2a1"},
 		Labels:    map[string]interface{}{"icinga.host_notes_url": "http://docs.mysite.com/panic/agent_down.html"}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hosts, err := config.icinga.ListHosts()
 
@@ -138,7 +142,8 @@ func TestHost(t *testing.T) {
 
 	config.rancher.AddHost(client.Host{Hostname: "agent2", AccountId: "1a5", Resource: client.Resource{Id: "2a2"}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	hosts, err = config.icinga.ListHosts()
 
@@ -210,9 +215,11 @@ func TestHost(t *testing.T) {
 
 	// Remove an agent
 
-	config.rancher.DeleteHost("2a1")
+	err = config.rancher.DeleteHost("2a1")
+	assert.Nil(err)
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	hosts, err = config.icinga.ListHosts()
 
@@ -252,7 +259,8 @@ func TestStack(t *testing.T) {
 	config.rancher.AddEnvironment(client.Project{Name: "Default", Resource: client.Resource{Id: "1a5"}})
 	config.rancher.AddStack(client.Stack{Name: "mystack", AccountId: "1a5", Resource: client.Resource{Id: "3a1"}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hosts, err := config.icinga.ListHosts()
 
@@ -276,7 +284,8 @@ func TestStack(t *testing.T) {
 
 	config.rancher.AddStack(client.Stack{Name: "mystack2", AccountId: "1a5", Resource: client.Resource{Id: "3a2"}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	hosts, err = config.icinga.ListHosts()
 
@@ -318,7 +327,8 @@ func TestStack(t *testing.T) {
 
 	config.rancher.DeleteStack("3a1")
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	hosts, err = config.icinga.ListHosts()
 
@@ -347,7 +357,8 @@ func TestStackDefaultIcingaVars(t *testing.T) {
 	config.rancher.AddEnvironment(client.Project{Name: "Default", Resource: client.Resource{Id: "1a5"}})
 	config.rancher.AddStack(client.Stack{Name: "mystack", AccountId: "1a5", Resource: client.Resource{Id: "3a1"}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hosts, _ := config.icinga.ListHosts()
 	host := hosts[0]
@@ -360,7 +371,8 @@ func TestStackDefaultIcingaVars(t *testing.T) {
 
 	config.stackDefaultIcingaVars = icinga2.Vars{"var1": "val1", "var3": "newval3", "var4": "val4"}
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	hosts, _ = config.icinga.ListHosts()
 	host = hosts[0]
@@ -397,7 +409,8 @@ func TestStackLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{
 			Labels: map[string]interface{}{"icinga.stack_vars": "var1=val1,var2=val2,var3=val3"}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hosts, err := config.icinga.ListHosts()
 
@@ -427,7 +440,8 @@ func TestStackLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{
 			Labels: map[string]interface{}{}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	hosts, _ = config.icinga.ListHosts()
 	host = hosts[0]
@@ -465,7 +479,8 @@ func TestStackDefaultAndLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{
 			Labels: map[string]interface{}{"icinga.stack_vars": "var2=local2,var4=local4"}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hosts, err := config.icinga.ListHosts()
 
@@ -498,7 +513,8 @@ func TestStackDefaultAndLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{
 			Labels: map[string]interface{}{}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	hosts, _ = config.icinga.ListHosts()
 	host = hosts[0]
@@ -538,7 +554,8 @@ func TestStackNotesURL(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{
 			Labels: map[string]interface{}{"icinga.stack_notes_url": "http://mysite.com/docs"}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	hosts, err := config.icinga.ListHosts()
 
@@ -566,7 +583,8 @@ func TestStackNotesURL(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{
 			Labels: map[string]interface{}{}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	hosts, _ = config.icinga.ListHosts()
 	host = hosts[0]
@@ -608,7 +626,8 @@ func TestService(t *testing.T) {
 		Resource:     client.Resource{Id: "3a1"},
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	services, err := config.icinga.ListServices()
 
@@ -635,7 +654,8 @@ func TestService(t *testing.T) {
 		Resource:     client.Resource{Id: "3a2"},
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	services, err = config.icinga.ListServices()
 
@@ -668,7 +688,8 @@ func TestService(t *testing.T) {
 		ServiceIds: []string{"3a2"}}) // need to update the stack with the ServiceIDs
 	config.rancher.DeleteService("3a1")
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	services, err = config.icinga.ListServices()
 
@@ -698,7 +719,8 @@ func TestServiceNotesURL(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{
 			"icinga.service_notes_url": "http://docs.mysite.com/service1.html"}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	services, err := config.icinga.ListServices()
 
@@ -721,7 +743,8 @@ func TestServiceNotesURL(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{
 			"icinga.service_notes_url": "http://newdocs.mysite.com/service1.html"}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	services, err = config.icinga.ListServices()
 
@@ -753,7 +776,8 @@ func TestServiceDefaultIcingaVars(t *testing.T) {
 		Resource:     client.Resource{Id: "3a1"},
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	services, err := config.icinga.ListServices()
 
@@ -772,7 +796,8 @@ func TestServiceDefaultIcingaVars(t *testing.T) {
 
 	config.serviceDefaultIcingaVars = icinga2.Vars{"myvar": "hi_there", "myothervar": "moin"}
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	services, err = config.icinga.ListServices()
 
@@ -805,7 +830,8 @@ func TestServiceLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{
 			"icinga.service_vars": "myvar=hello,somevar=whatever"}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	services, err := config.icinga.ListServices()
 
@@ -828,7 +854,8 @@ func TestServiceLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{
 			"icinga.service_vars": "myvar=hello,anothervar=boing"}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	services, err = config.icinga.ListServices()
 
@@ -868,7 +895,8 @@ func TestServiceDefaultAndLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{
 			"icinga.service_vars": "var2=localvalue2,var4=localvalue4"}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	services, err := config.icinga.ListServices()
 
@@ -898,7 +926,8 @@ func TestServiceDefaultAndLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{
 			"icinga.service_vars": "var4=newlocalvalue4,var6=localvalue6"}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	services, err = config.icinga.ListServices()
 
@@ -1057,13 +1086,15 @@ func TestEverything(t *testing.T) {
 		Resource:     client.Resource{Id: "4b5"},
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{"icinga.service_vars": "do_not_break=please"}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	assertEverything(assert, config)
 
 	// If we sync again, it should still work.
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	assertEverything(assert, config)
 
@@ -1224,7 +1255,8 @@ func TestCustomCheck(t *testing.T) {
     http_port: 80
     http_uri: /health`}}})
 
-	sync(config)
+	err := sync(config)
+	assert.Nil(err)
 
 	services, err := config.icinga.ListServices()
 
@@ -1283,7 +1315,8 @@ func TestCustomCheck(t *testing.T) {
     http_port: 80
     http_uri: /health`}}})
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	services, err = config.icinga.ListServices()
 
@@ -1340,7 +1373,8 @@ func TestCustomCheck(t *testing.T) {
 		ServiceIds: []string{"3a2"}})
 	config.rancher.DeleteService("3a1")
 
-	sync(config)
+	err = sync(config)
+	assert.Nil(err)
 
 	services, err = config.icinga.ListServices()
 
