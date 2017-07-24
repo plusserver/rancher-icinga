@@ -80,27 +80,47 @@ func (r *RancherWebClient) AddHost(host client.Host) {
 }
 
 func (r *RancherWebClient) Environments() (environments *client.ProjectCollection, err error) {
-	environments, err = r.rancher.Project.List(nil)
+	envList, err := r.rancher.Project.List(nil)
+	envArr := envList.Data
+
+	for envList.Pagination != nil && envList.Pagination.Partial {
+		envList, err = envList.Next()
+		if err != nil {
+			return
+		}
+
+		envArr = append(envArr, envList.Data...)
+	}
+
 	if err != nil {
 		return
 	}
-	for _, env := range environments.Data {
+	for _, env := range envArr {
 		r.AddEnvironment(env)
 	}
-
-	return
+	return &client.ProjectCollection{Data: envArr}, nil
 }
 
 func (r *RancherWebClient) Hosts() (hosts *client.HostCollection, err error) {
-	hosts, err = r.rancher.Host.List(nil)
+	hostList, err := r.rancher.Host.List(nil)
+	hostArr := hostList.Data
+
+	for hostList.Pagination != nil && hostList.Pagination.Partial {
+		hostList, err = hostList.Next()
+		if err != nil {
+			return
+		}
+
+		hostArr = append(hostArr, hostList.Data...)
+	}
+
 	if err != nil {
 		return
 	}
-	for _, host := range hosts.Data {
-		r.AddHost(host)
+	for _, env := range hostArr {
+		r.AddHost(env)
 	}
-
-	return
+	return &client.HostCollection{Data: hostArr}, nil
 }
 
 func (r *RancherWebClient) GetEnvironment(id string) client.Project {
@@ -121,14 +141,25 @@ func (r *RancherWebClient) GetHost(id string) client.Host {
 }
 
 func (r *RancherWebClient) Stacks() (stacks *client.StackCollection, err error) {
-	stacks, err = r.rancher.Stack.List(nil)
+	stackList, err := r.rancher.Stack.List(nil)
+	stackArr := stackList.Data
+
+	for stackList.Pagination != nil && stackList.Pagination.Partial {
+		stackList, err = stackList.Next()
+		if err != nil {
+			return
+		}
+
+		stackArr = append(stackArr, stackList.Data...)
+	}
+
 	if err != nil {
 		return
 	}
-	for _, env := range stacks.Data {
+	for _, env := range stackArr {
 		r.AddStack(env)
 	}
-	return
+	return &client.StackCollection{Data: stackArr}, nil
 }
 
 func (r *RancherWebClient) GetStack(id string) client.Stack {
@@ -140,14 +171,25 @@ func (r *RancherWebClient) GetStack(id string) client.Stack {
 }
 
 func (r *RancherWebClient) Services() (services *client.ServiceCollection, err error) {
-	services, err = r.rancher.Service.List(nil)
+	serviceList, err := r.rancher.Service.List(nil)
+	serviceArr := serviceList.Data
+
+	for serviceList.Pagination != nil && serviceList.Pagination.Partial {
+		serviceList, err = serviceList.Next()
+		if err != nil {
+			return
+		}
+
+		serviceArr = append(serviceArr, serviceList.Data...)
+	}
+
 	if err != nil {
 		return
 	}
-	for _, env := range services.Data {
+	for _, env := range serviceArr {
 		r.AddService(env)
 	}
-	return
+	return &client.ServiceCollection{Data: serviceArr}, nil
 }
 
 func (r *RancherWebClient) GetService(id string) client.Service {
