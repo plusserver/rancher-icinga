@@ -1,7 +1,9 @@
 package main
 
 import (
-	//"fmt"
+	"fmt"
+	"os"
+	"os/exec"
 	"testing"
 	"text/template"
 
@@ -14,12 +16,31 @@ func initForTests() *RancherIcingaConfig {
 
 	rancher := NewRancherMockClient()
 
-	icinga := icinga2.NewMockClient()
 	config, _ := NewBaseConfig()
 
 	config.rancher = rancher
-	config.icinga = icinga
 
+	if script := os.Getenv("ICINGA_TEST_RESET_SCRIPT"); script != "" {
+		config.icinga, _ = icinga2.New(icinga2.WebClient{
+			URL:         os.Getenv("ICINGA_URL"),
+			Username:    os.Getenv("ICINGA_USER"),
+			Password:    os.Getenv("ICINGA_PASSWORD"),
+			Debug:       false,
+			InsecureTLS: true,
+			Zone:        "icinga2-master"})
+
+		cmd := exec.Command(script)
+		output, err := cmd.CombinedOutput()
+
+		if err != nil {
+			panic(fmt.Errorf("%s: %s\n", err, output))
+		} else {
+			fmt.Println(string(output))
+		}
+
+	} else {
+		config.icinga = icinga2.NewMockClient()
+	}
 	return config
 }
 
@@ -402,7 +423,7 @@ func TestStackLocalIcingaVars(t *testing.T) {
 		Resource:     client.Resource{Id: "3a1"},
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{}}})
 	config.rancher.AddService(client.Service{
-		Name:      "service1",
+		Name:      "service2",
 		AccountId: "1a5",
 		StackId:   "2a1",
 		Resource:  client.Resource{Id: "3a2"},
@@ -506,7 +527,7 @@ func TestStackDefaultAndLocalIcingaVars(t *testing.T) {
 		LaunchConfig: &client.LaunchConfig{
 			Labels: map[string]interface{}{"icinga.stack_vars": "var4=newlocal4,var6=local6"}}})
 	config.rancher.AddService(client.Service{
-		Name:      "service1",
+		Name:      "service2",
 		AccountId: "1a5",
 		StackId:   "2a1",
 		Resource:  client.Resource{Id: "3a2"},
@@ -547,7 +568,7 @@ func TestStackNotesURL(t *testing.T) {
 		Resource:     client.Resource{Id: "3a1"},
 		LaunchConfig: &client.LaunchConfig{Labels: map[string]interface{}{}}})
 	config.rancher.AddService(client.Service{
-		Name:      "service1",
+		Name:      "service2",
 		AccountId: "1a5",
 		StackId:   "2a1",
 		Resource:  client.Resource{Id: "3a2"},

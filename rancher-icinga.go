@@ -394,8 +394,12 @@ func syncRancherHosts(config *RancherIcingaConfig) error {
 
 				if needUpdate {
 					debugLog("    update "+ih.Name, 1)
-					config.icinga.UpdateHost(ih)
-					registerChange("update", ih.Name, "host", ih.Vars, ih)
+					err = config.icinga.UpdateHost(ih)
+					if err != nil {
+						fmt.Printf("ERROR: could not update host %s: %s\n", ih.Name, err)
+					} else {
+						registerChange("update", ih.Name, "host", ih.Vars, ih)
+					}
 				}
 			}
 		}
@@ -439,8 +443,12 @@ func syncRancherHosts(config *RancherIcingaConfig) error {
 
 				if needUpdate {
 					debugLog("    update "+is.Name, 1)
-					config.icinga.UpdateService(is)
-					registerChange("update", is.Name, "service", is.Vars, is)
+					err = config.icinga.UpdateService(is)
+					if err != nil {
+						fmt.Printf("ERROR: could not update host %s: %s\n", is.Name, err)
+					} else {
+						registerChange("update", is.Name, "service", is.Vars, is)
+					}
 				}
 			}
 		}
@@ -589,7 +597,10 @@ func syncRancherStacks(config *RancherIcingaConfig) error {
 
 				if needUpdate {
 					debugLog("    update "+ih.Name, 1)
-					config.icinga.UpdateHost(ih)
+					err = config.icinga.UpdateHost(ih)
+					if err != nil {
+						fmt.Printf("ERROR: could not update host %s: %s\n", ih.Name, err)
+					}
 					registerChange("update", ih.Name, "host", ih.Vars, ih)
 				}
 
@@ -683,8 +694,12 @@ func syncRancherServices(config *RancherIcingaConfig) error {
 
 				if needUpdate {
 					debugLog("    update "+is.Name, 1)
-					config.icinga.UpdateService(is)
-					registerChange("update", is.Name, "service", is.Vars, is)
+					err = config.icinga.UpdateService(is)
+					if err != nil {
+						fmt.Printf("ERROR: could not update service %s: %s\n", is.Name, err)
+					} else {
+						registerChange("update", is.Name, "service", is.Vars, is)
+					}
 				}
 			}
 		}
@@ -737,7 +752,11 @@ func syncRancherServices(config *RancherIcingaConfig) error {
 					if needUpdate {
 						debugLog("    update "+is.Name, 1)
 						config.icinga.UpdateService(is)
-						registerChange("update", is.Name, "service", is.Vars, is)
+						if err != nil {
+							fmt.Printf("ERROR: could not update service %s: %s\n", is.Name, err)
+						} else {
+							registerChange("update", is.Name, "service", is.Vars, is)
+						}
 					}
 				}
 			}

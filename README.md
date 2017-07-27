@@ -190,6 +190,19 @@ rancher-icinga makes. A JSON object will be posted with the following fields:
 
 The URL supports the username:password@... syntax.
 
+## Testing
+
+There are tests for filtering and for updating icinga2 objects. If run with an empty environment, mocks are used.
+
+To test with a running Icinga2, set the environment variable ICINGA_TEST_RESET_SCRIPT to a file containing a
+script that is run before every single test to initialize/reset the Icinga2 instance. Some tests expect an exact
+number of objects in the target Icinga2 and would fail if there is anything else. When testing in this mode,
+the environment variables ICINGA_URL, ICINGA_USER and ICINGA_PASSWORD are used.
+
+An example reset script can be found in `examples/reset-icinga.sh`.
+
+Be careful to use this mode only with a dummy testing instance.
+
 ## FAQ
 
 ### Why does a new Rancher environment not show up in Icinga2?
