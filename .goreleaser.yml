@@ -1,0 +1,15 @@
+builds:
+  - binary: rancher-icinga
+    goos:
+    - windows
+    - darwin
+    - linux
+    goarch:
+    - amd64
+    env:
+    - CGO_ENABLED=0
+archive:
+  format: tar.gz
+release:
+  draft: true
+

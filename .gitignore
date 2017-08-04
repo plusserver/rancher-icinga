@@ -5,3 +5,5 @@ bin
 pkg
 eventlistener/src
 eventlistener/eventlistener
+*.sh
+dist
